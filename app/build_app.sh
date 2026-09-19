@@ -20,6 +20,14 @@ MACOS="$CONTENTS/MacOS"
 RES="$CONTENTS/Resources"
 
 echo "==> assembling $APP"
+# Kill any previous instance BEFORE swapping the bundle: a stale running
+# app with a dead tap next to a fresh build is exactly the "hotkeys don't
+# work" ghost from t_49e2302f.
+if pgrep -x "$APP_NAME" >/dev/null; then
+    echo "==> killing stale $APP_NAME instance(s): $(pgrep -x "$APP_NAME" | tr '\n' ' ')"
+    pkill -x "$APP_NAME" || true
+    sleep 1
+fi
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 cp "$BIN" "$MACOS/$APP_NAME"
