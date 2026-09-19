@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import SpecCatch
 
 /// ObjC exception bridge: AVAudioEngine.prepare()/start() raise
 /// NSException (`com.apple.coreaudio.avfaudio`), which Swift `do/catch`
@@ -11,25 +12,25 @@ enum ExceptionGuard {
     /// Runs `body`; returns nil on success, error description if an
     /// Objective-C exception (or Swift error) was thrown.
     static func run(_ body: () throws -> Void) -> String? {
-        // Bridge: Swift errors re-thrown inside raising() surface as
-        // _ObjectiveC exception wrappers; catching everything is deliberate —
-        // capture path must never crash the app (brief §8).
-        do {
-            try NSException_blockCatch { try body() }
-            return nil
-        } catch let e as NSError {
-            return "\(e.domain)/\(e.code): \(e.localizedDescription)"
-        } catch {
-            return "\(error)"
+        var name: NSString?
+        var reason: NSString?
+        if NSException_blockCatch({ try? body() }, &name, &reason) {
+            return "\(name ?? "unknown")/\(reason ?? "(no reason)")"
         }
+        return nil
     }
 }
 
 /// CoreAudio pre-flight: default input device exists, is alive, has channels.
 enum AudioPreflight {
     struct Info { let deviceID: AudioDeviceID; let name: String; let channels: UInt32 }
+    struct Failure: Error, ExpressibleByStringLiteral {
+        let why: String
+        init(why: String) { self.why = why }
+        init(stringLiteral value: String) { self.why = value }
+    }
 
-    static func check() -> Result<Info, String> {
+    static func check() -> Result<Info, Failure> {
         func pa(_ s: AudioObjectPropertySelector, _ sc: AudioObjectPropertyScope) -> AudioObjectPropertyAddress {
             AudioObjectPropertyAddress(mSelector: s, mScope: sc, mElement: kAudioObjectPropertyElementMain)
         }
@@ -37,22 +38,22 @@ enum AudioPreflight {
         var sz = UInt32(MemoryLayout<AudioDeviceID>.size)
         var a = pa(kAudioHardwarePropertyDefaultInputDevice, kAudioObjectPropertyScopeGlobal)
         let st = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &sz, &dev)
-        guard st == noErr, dev != 0 else { return .failure("no default input device (status=\(st))") }
+        guard st == noErr, dev != 0 else { return .failure(Failure(why: "no default input device (status=\(st))")) }
         var alive: UInt32 = 0
         var aa = pa(kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal)
         var asz = UInt32(4)
         AudioObjectGetPropertyData(dev, &aa, 0, nil, &asz, &alive)
-        guard alive == 1 else { return .failure("default input device \(dev) is not alive") }
+        guard alive == 1 else { return .failure(Failure(why: "default input device \(dev) is not alive")) }
         var cssz = UInt32(0)
         var ac = pa(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeInput)
         AudioObjectGetPropertyDataSize(dev, &ac, 0, nil, &cssz)
-        guard cssz > 0 else { return .failure("default input device \(dev) reports no input stream") }
+        guard cssz > 0 else { return .failure(Failure(why: "default input device \(dev) reports no input stream")) }
         var buf = [UInt8](repeating: 0, count: Int(cssz))
         AudioObjectGetPropertyData(dev, &ac, 0, nil, &cssz, &buf)
         let bl = buf.withUnsafeBytes { $0.baseAddress!.assumingMemoryBound(to: AudioBufferList.self) }
         var ch: UInt32 = 0
         for i in 0..<Int(bl.pointee.mNumberBuffers) { ch += bl.pointee.mBuffers.mNumberChannels }
-        guard ch > 0 else { return .failure("default input device \(dev) has 0 input channels") }
+        guard ch > 0 else { return .failure(Failure(why: "default input device \(dev) has 0 input channels")) }
         var nm: CFString = "" as CFString
         var nsz = UInt32(MemoryLayout<CFString>.size)
         var anx = pa(kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal)
@@ -105,13 +106,20 @@ final class AudioCapture {
         // macOS 27 regression: prepare() with an untouched inputNode throws an
         // ObjC exception (inputNode != nullptr) on this host — every device,
         // every process (t_220b8507 run 28). Querying the input format first
-        // makes the graph initialize. Do NOT reorder these three lines.
+        // makes the graph initialize. Do NOT reorder these lines.
+        if case .failure(let pf) = AudioPreflight.check() {
+            throw CaptureError(why: pf.why)
+        }
         let inFmt = engine.inputNode.outputFormat(forBus: 0)
         guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else {
             throw CaptureError(why: "no live input device (rate=\(inFmt.sampleRate) ch=\(inFmt.channelCount))")
         }
-        engine.prepare()
-        try engine.start()
+        if let exc = ExceptionGuard.run({ [engine] in
+            engine.prepare()
+            try engine.start()
+        }) {
+            throw CaptureError(why: "engine init: \(exc)")
+        }
         return inFmt
     }
 
