@@ -11,13 +11,17 @@ Secondary (door open, not scope): other Mac users — the build must stay rename
 Voice-to-text today forces a choice: raw transcripts that read like speech (fillers, mishearings, run-on sentences), or slow cloud products with round-trip latency and privacy cost. 30 seconds from stop-talking to usable text is a non-starter.
 
 ## Behavior (v1)
-1. Menu-bar app (no dock icon). Global hotkey: **hold = push-to-talk** (default), **tap = toggle** record on/off.
+1. Menu-bar app (no dock icon). Global hotkey (REVISED 2026-09-18 at owner request — the original ⌘⌥Space binding collided with other apps):
+   - **Hold ⌃⌘ = push-to-talk.** Release either modifier → stop, polish, insert. This is the only keyboard gesture.
+   - Tap-to-toggle is **retired**: a modifier-only chord cannot distinguish tap from hold. Hands-free toggle moves to a menu-bar item ("Start/Stop Recording").
+   - While ⌃⌘ is held, capture starts only after a ~150 ms dwell with no other key pressed; any key press before that abandons the start and passes the event through **unchanged** (⌃⌘Q, ⌃⌘F, ⌃⌘Space et al. must keep working). A key press during capture cancels it with nothing inserted.
+   - Collision regression is an acceptance criterion (see AC1).
 2. While speaking, a minimal overlay pill appears: status + live partial transcript so the user knows it's listening and understanding.
 3. On stop, the pipeline (local STT → local LLM cleanup) completes and the polished text is **inserted into the focused app** (clipboard-restore paste technique).
 4. Two cleanup profiles:
    - **Polish (default):** strip fillers (um/uh/you-know), fix mishearings, fix grammar/punctuation/capitalization, keep the user's voice and word choice.
    - **Rewrite (heavy):** restructure into clear sentences, tighten, bullets when the speech was a list, professional tone.
-   - Profile switchable from the menu-bar menu; quick variant: second hotkey (⌥⌘Space) always means Rewrite.
+   - Profile switchable from the menu-bar menu; quick variant: **hold ⌃⌘⇧** always means Rewrite (replaces the retired ⌥⌘Space variant).
 5. Language: **English only** (STT English-optimized; cleanup prompt English-tuned).
 6. Esc cancels the capture — nothing is inserted, clipboard untouched.
 7. Empty/failed capture → nothing inserted, subtle overlay state, never a crash.
@@ -41,7 +45,7 @@ How this must be achieved (architectural constraints, not suggestions):
 - The overlay updates within 100 ms of hotkey press (perceived latency matters as much as real latency).
 
 ## Acceptance criteria (what I review against)
-1. App runs on this Mac as a menu-bar item; hold-to-talk and tap-to-toggle both work globally in Notes, TextEdit, Chrome, and Terminal.
+1. App runs on this Mac as a menu-bar item; hold-to-talk works globally in Notes, TextEdit, Chrome, and Terminal; hands-free toggle works from the menu bar. **Collision regression: ⌃⌘Q, ⌃⌘F, ⌃⌘Space, ⌃⌘← must behave exactly as they did before QuickScribe was installed** — QuickScribe must not swallow them.
 2. TTI budgets above are met with **evidence**: benchmark script + results logged (`docs/benchmark.md`), demonstrated in a real focused app.
 3. Polish profile demonstrably removes fillers/fixes punctuation while preserving phrasing; Rewrite demonstrably restructures; both switchable without relaunch.
 4. Esc cancels cleanly; LLM-down inserts raw transcript; no crash paths in the demo.

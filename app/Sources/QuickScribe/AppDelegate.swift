@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         session.onPhaseChange = { [weak self] recording in
             self?.statusItem.button?.title = recording ? "🔴" : "🎙︎"
+            self?.rebuildMenu()   // keep the hands-free toggle label truthful
         }
 
         requestPermissions { [weak self] in
@@ -72,16 +73,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        let how = NSMenuItem(title: "⌘⌥Space  tap=toggle / hold=push-to-talk", action: nil, keyEquivalent: "")
+        let how = NSMenuItem(title: "Hold \(AppInfo.holdLabel) to talk, release to insert", action: nil, keyEquivalent: "")
         how.isEnabled = false
         menu.addItem(how)
+
+        // Hold-only keyboard gesture → hands-free toggle lives here (owner UX change 2026-09-18).
+        let toggle = NSMenuItem(title: session.isRecording ? "Stop Recording (hands-free)" : "Start Recording (hands-free)",
+                                action: #selector(toggleHandsFree), keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(toggle)
 
         let polish = NSMenuItem(title: "Polish (default)", action: #selector(selectPolish), keyEquivalent: "")
         polish.target = self
         polish.state = profile == "polish" ? .on : .off
         menu.addItem(polish)
 
-        let rewrite = NSMenuItem(title: "Rewrite  (or ⌘⌥⌃Space)", action: #selector(selectRewrite), keyEquivalent: "")
+        let rewrite = NSMenuItem(title: "Rewrite  (or hold \(AppInfo.holdRewriteLabel))", action: #selector(selectRewrite), keyEquivalent: "")
         rewrite.target = self
         rewrite.state = profile == "rewrite" ? .on : .off
         menu.addItem(rewrite)
@@ -102,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func selectPolish() { profile = "polish"; session.defaultProfile = "polish"; rebuildMenu() }
     @objc private func selectRewrite() { profile = "rewrite"; session.defaultProfile = "rewrite"; rebuildMenu() }
+    @objc private func toggleHandsFree() { session.toggleHandsFree() }
 
     @objc private func showHistory() { historyWindow.toggle(relativeTo: statusItem.button!) }
 }

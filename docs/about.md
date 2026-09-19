@@ -6,7 +6,7 @@
 
 **Speak messy. Land clean text. Fully local.**
 
-Hold ⌘⌥Space, talk the way you actually talk — fillers, restarts, "you know" and all. Release. About half a second later, a clean version of what you said is typing itself into the app you were already using. Your clipboard is exactly what it was before. Nothing left your machine: the audio goes to a service on `127.0.0.1`, the transcript gets cleaned by an LLM running on your own hardware, and the history lives in a sqlite file you could delete with `rm`.
+Hold ⌃⌘, talk the way you actually talk — fillers, restarts, "you know" and all. Release. About half a second later, a clean version of what you said is typing itself into the app you were already using. Your clipboard is exactly what it was before. Nothing left your machine: the audio goes to a service on `127.0.0.1`, the transcript gets cleaned by an LLM running on your own hardware, and the history lives in a sqlite file you could delete with `rm`.
 
 No account. No upload. No "30 seconds from stop-talking to usable text" cloud round trip.
 

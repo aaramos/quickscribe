@@ -1,9 +1,11 @@
 import AppKit
 
 /// The capture-session state machine. Owns the full lifecycle per brief:
-/// press → record (+streaming partials) → release → tail → final STT →
+/// hold ⌃⌘ → record (+streaming partials) → release → tail → final STT →
 /// polish (bounded by TTI budget, PM: degraded→retry once→raw) →
-/// insert exactly once → history. Esc cancels, sidecar-down never crashes.
+/// insert exactly once → history. Any key press or Esc cancels, sidecar-down
+/// never crashes. (Owner UX change 2026-09-18: hold-only keyboard gesture;
+/// hands-free toggle lives in the menu bar.)
 @MainActor
 final class SessionController {
     enum Mode { case idle, pushToTalk, toggled }
@@ -12,7 +14,7 @@ final class SessionController {
     private var rewriteProfile = false
     var profile: String { rewriteProfile ? "rewrite" : "polish" }
     /// Menu-selected default profile ("polish" | "rewrite"); the
-    /// ⌘⌥⌃Space hotkey overrides per-session (brief §4).
+    /// ⌃⌘⇧ hold overrides per-session (brief §4).
     var defaultProfile = "polish"
 
     private let capture = AudioCapture()
@@ -36,8 +38,8 @@ final class SessionController {
     var onPhaseChange: ((Bool) -> Void)?
 
     init() {
-        hotkeys.onHotkey = { [weak self] down, rewrite in
-            Task { @MainActor in self?.hotkey(down: down, rewrite: rewrite) }
+        hotkeys.onIntent = { [weak self] intent in
+            Task { @MainActor in self?.handle(intent: intent) }
         }
         overlay.onEscape = { [weak self] in
             Task { @MainActor in self?.cancel() }
@@ -49,26 +51,35 @@ final class SessionController {
 
     var isRecording: Bool { mode != .idle }
 
-    // MARK: - Hotkey FSM (hold wins on press)
+    // MARK: - Hotkey intent FSM (hold-only; see HotkeyManager)
 
-    func hotkey(down: Bool, rewrite: Bool) {
-        if down {
-            guard mode == .idle else {
-                // Press while toggled-on → toggle off (end session).
-                if mode == .toggled { finish() }
-                return
-            }
+    private func handle(intent: HotkeyManager.Intent) {
+        switch intent {
+        case .start(let rewrite):
+            guard mode == .idle else { return } // toggled session: keyboard stays out of it
             start(rewrite: rewrite)
-        } else { // up
+        case .stop(let rewrite):
+            // Only a push-to-talk session ends on modifier release.
             guard mode == .pushToTalk else { return }
-            let held = Date().timeIntervalSince(sessionStart)
-            if held < AppInfo.tapThreshold {
-                // Quick tap → toggle mode: recording continues.
-                mode = .toggled
-            } else {
-                // Held past threshold → push-to-talk ends here.
-                finish()
-            }
+            _ = rewrite
+            finish()
+        case .cancel:
+            // Key pressed mid-capture → cancel, nothing inserted. In toggled
+            // (hands-free) mode ordinary typing must NOT kill the session.
+            guard mode == .pushToTalk else { return }
+            cancel()
+        }
+    }
+
+    /// Menu-bar hands-free toggle: "Start/Stop Recording (hands-free)".
+    func toggleHandsFree() {
+        switch mode {
+        case .idle:
+            start(rewrite: defaultProfile == "rewrite")
+            // start() failed (mic denied) → mode stays .idle; don't lie.
+            if mode == .pushToTalk { mode = .toggled }
+        case .pushToTalk, .toggled:
+            finish()
         }
     }
 

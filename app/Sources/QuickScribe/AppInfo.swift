@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// SINGLE PLACE for app identity (brief §Naming / acceptance 9).
@@ -9,9 +10,20 @@ enum AppInfo {
     /// Sidecar contract (runbook §Contracts) — localhost only, port fixed.
     static let sidecarBase = "http://127.0.0.1:8790"
 
-    /// Tap vs hold discrimination threshold (seconds). Hold wins on press:
-    /// press always starts capture; only a *quick release* switches to toggle.
-    static let tapThreshold: TimeInterval = 0.25
+    /// PRIMARY hotkey chord (owner UX change 2026-09-18: modifier-only hold;
+    /// the old ⌘⌥Space binding was removed — it collided with other apps).
+    /// Hold ⌃⌘ = capture start (after `holdDwell` with no key press);
+    /// release either modifier = stop, polish, insert.
+    static let holdModifiers: CGEventFlags = [.maskControl, .maskCommand]
+    /// Hold ⌃⌘⇧ = forced Rewrite profile.
+    static let holdRewriteModifiers: CGEventFlags = [.maskControl, .maskCommand, .maskShift]
+    /// Human-readable labels — defined ONCE here (brief §Naming / acceptance 9).
+    static let holdLabel = "⌃⌘"
+    static let holdRewriteLabel = "⌃⌘⇧"
+    /// Both modifiers must be held this long, with NO key press in between,
+    /// before capture starts. Key press before dwell elapses → abort start and
+    /// pass through (⌃⌘F / ⌃⌘Q / ⌃⌘Space keep working normally).
+    static let holdDwell: TimeInterval = 0.15
 
     /// Streaming chunk boundary for /transcribe partial (runbook: ~1–2 s).
     /// Chunks are NON-overlapping: partial results concatenate verbatim,

@@ -57,12 +57,13 @@ A 🎙︎ icon appears in the menu bar. That's the whole UI. (Sidecar down? The 
 
 | Keys | Action |
 |---|---|
-| **⌘⌥Space** (hold) | Push-to-talk: record while held, release to finish |
-| **⌘⌥Space** (tap) | Toggle: release quickly and recording continues until you press again |
-| **⌘⌥⌃Space** | Same gestures, forced **Rewrite** profile |
+| **Hold ⌃⌘** | Push-to-talk: capture starts after a brief dwell (no key pressed during it); release either modifier to finish |
+| **Hold ⌃⌘⇧** | Same gesture, forced **Rewrite** profile |
+| **⌃⌘ + any key** | Passes through untouched — ⌃⌘F, ⌃⌘Q, ⌃⌘Space work exactly as before; a key press during capture cancels it (nothing inserted) |
 | **Esc** | Cancel — nothing is inserted, clipboard untouched |
+| **Menu bar → Start Recording (hands-free)** | Hands-free toggle: record until you click Stop |
 
-Hold always wins on press: capture starts the instant you press; a quick release (<0.25 s) switches to toggle mode. Works globally — Notes, TextEdit, Chrome, Terminal.
+Modifier-only hold (owner UX change 2026-09-18 — the old ⌘⌥Space binding collided with other apps and is removed). Capture only arms once both ⌃ and ⌘ have been held ~150 ms with no key in between, so ⌃⌘-prefixed system shortcuts keep working everywhere. Works globally — Notes, TextEdit, Chrome, Terminal.
 
 ## Profiles
 

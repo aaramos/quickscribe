@@ -1,41 +1,125 @@
-import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 
 /// Global hotkey listener (CGEvent tap — works while other apps are focused;
 /// requires Accessibility permission).
-///   ⌘⌥Space         press starts capture; quick release (<tapThreshold)
-///                   switches to toggle mode; hold = push-to-talk (hold wins
-///                   while held — brief §1 + card B "hold takes precedence").
-///   ⌘⌥⌃Space      same gesture, Rewrite profile (brief §4 variant).
+///
+/// Owner UX change 2026-09-18: modifier-only chord, replacing ⌘⌥Space
+/// (which collided with other apps). Pure listen-only tap — QuickScribe
+/// never cancels or modifies an event; every key keeps reaching the system
+/// untouched.
+///   Hold ⌃⌘            after a ~150 ms dwell with NO key press in between,
+///                     start capture; release EITHER ⌃ or ⌘ → stop → insert.
+///   Hold ⌃⌘⇧          same, forced Rewrite profile (⇧ may arrive before or
+///                     during the dwell; only its presence at fire time counts).
+///   ⌃⌘ + key < dwell abort the pending start, pass through
+///                     (⌃⌘F / ⌃⌘Q / ⌃⌘Space behave exactly as before).
+///   key during        cancel capture with nothing inserted, pass through.
+///   Esc               cancel (handled by the overlay's own monitor).
 final class HotkeyManager {
-    /// (down: Bool, rewrite: Bool) — called on the main queue.
-    var onHotkey: ((Bool, Bool) -> Void)?
-    var onHeldPoll: (() -> Void)?
+    /// The single gesture intent the session FSM consumes (main queue).
+    enum Intent: Equatable {
+        case start(rewrite: Bool)
+        case stop(rewrite: Bool)
+        case cancel
+    }
+
+    var onIntent: ((Intent) -> Void)?
+
+    fileprivate enum State: Equatable { case idle, pending, capturing }
+    func _handleForTesting(type: CGEventType, event: CGEvent) { handle(type: type, event: event) }
 
     private var eventTap: CFMachPort?
-    private var downAt: TimeInterval = 0
-    private var heldRewrite = false
-    private var pollTimer: Timer?
+    private var state: State = .idle
+    private var pendingRewrite = false
+    private var capturedRewrite = false
+    private var dwellTimer: Timer?
 
-    private static func cmdOpt(_ flags: CGEventFlags) -> Bool {
-        flags.contains(.maskCommand) && flags.contains(.maskAlternate)
+    /// Subset of CGEventFlags we reason about (device-independent masks).
+    private static let ctrl: CGEventFlags  = .maskControl
+    private static let cmd:  CGEventFlags  = .maskCommand
+    private static let shift: CGEventFlags = .maskShift
+
+    /// Stable modifier bits only — strips caps-lock/numeric-pad/fn noise.
+    private static func mods(_ flags: CGEventFlags) -> CGEventFlags {
+        CGEventFlags(rawValue: flags.rawValue &
+            (CGEventFlags.maskControl.rawValue | CGEventFlags.maskCommand.rawValue
+             | CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskShift.rawValue))
     }
-    private static func cmdOptCtrl(_ flags: CGEventFlags) -> Bool {
-        flags.contains(.maskCommand) && flags.contains(.maskAlternate) && flags.contains(.maskControl)
+    private static func hasCtrlCmd(_ flags: CGEventFlags) -> Bool {
+        let cc = CGEventFlags.maskControl.union(.maskCommand)
+        return mods(flags).intersection(cc) == cc
     }
+    private static func isRewrite(_ flags: CGEventFlags) -> Bool {
+        hasCtrlCmd(flags) && mods(flags).contains(.maskShift)
+    }
+
+    // MARK: - Pure state machine (unit-testable; the tap below only adapts it)
+
+    /// Reduce one event to zero or one Intent. No side effects here.
+    /// `capturedRewrite` is the profile locked in when capture started —
+    /// the stop intent must carry it, not whatever ⇧ is doing at release.
+    /// `flags` is the TRACKED modifier mask (see handle()), not the raw
+    /// event flags — a keyUp event's flags omit the key being released.
+    fileprivate static func reduce(state: State, type: CGEventType, flags: CGEventFlags, capturedRewrite: Bool = false) -> (Intent?, State) {
+        switch type {
+        case .flagsChanged:
+            switch state {
+            case .idle:
+                if hasCtrlCmd(flags) {
+                    // Both ⌃⌘ down → arm the dwell. ⇧ toggling mid-pending
+                    // re-arms (profile snapshot happens at fire time).
+                    return (nil, .pending)
+                }
+                return (nil, .idle)
+            case .pending:
+                if !hasCtrlCmd(flags) {
+                    // Released a modifier before dwell elapsed → nothing ever
+                    // started; a plain modifier release passes through.
+                    return (nil, .idle)
+                }
+                // ⌃⌘ still held (⇧ may have toggled) → re-arm dwell window.
+                return (nil, .pending)
+            case .capturing:
+                if !hasCtrlCmd(flags) {
+                    // Release of EITHER ⌃ or ⌘ = stop → polish → insert.
+                    // Profile is whatever was locked in when capture started.
+                    return (.stop(rewrite: capturedRewrite), .idle)
+                }
+                // ⇧ pressed/released while ⌃⌘ still held: profile update, no intent.
+                return (nil, .capturing)
+            }
+        case .keyDown:
+            switch state {
+            case .idle:
+                return (nil, .idle)
+            case .pending:
+                // A key arrived inside the dwell window (⌃⌘F, ⌃⌘Q, ⌃⌘Space…).
+                // Abort the pending start; the chord was a system shortcut.
+                return (nil, .idle)
+            case .capturing:
+                // Any key during capture cancels with nothing inserted.
+                // (Esc arrives here too — the overlay monitor does the
+                // clipboard-safe cancel; identical outcome by design.)
+                return (.cancel, .idle)
+            }
+        default:
+            return (nil, state)
+        }
+    }
+
+    // MARK: - Event tap wiring
 
     func start() {
         let mask: CGEventMask =
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.keyUp.rawValue)
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.keyDown.rawValue)
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             let me = Unmanaged<HotkeyManager>.fromOpaque(refcon!).takeUnretainedValue()
             me.handle(type: type, event: event)
-            return Unmanaged.passUnretained(event)
+            return Unmanaged.passUnretained(event) // NEVER swallow
         }
-        // Listen-only tap: events flow through untouched.
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
                                            options: .listenOnly, eventsOfInterest: mask,
                                            callback: callback, userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
@@ -53,32 +137,52 @@ final class HotkeyManager {
             if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
-        guard event.getIntegerValueField(.keyboardEventKeycode) == CGKeyCode(kVK_Space) else { return }
-        let flags = event.flags
-        let rewrite = Self.cmdOptCtrl(flags)
-        let plain = Self.cmdOpt(flags) && !rewrite
-        // Mach absolute time → seconds, same clock everywhere here.
-        let now = CFAbsoluteTimeGetCurrent()
+        // Auto-repeat of a held key: already handled / irrelevant.
+        if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return }
 
-        if type == .keyDown {
-            guard plain || rewrite else { return }
-            if downAt > 0 { return } // auto-repeat while held
-            downAt = now
-            heldRewrite = rewrite
-            DispatchQueue.main.async { [weak self] in self?.onHotkey?(true, rewrite) }
-            pollTimer?.invalidate()
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-                self?.onHeldPoll?()
+        let flags = event.flags
+        lastFlags = flags
+        switch type {
+        case .flagsChanged:
+            let (intent, next) = Self.reduce(state: state, type: type, flags: flags, capturedRewrite: capturedRewrite)
+            switch next {
+            case .pending:
+                pendingRewrite = Self.isRewrite(flags)
+                armDwell()
+            case .idle:
+                dwellTimer?.invalidate(); dwellTimer = nil
+            case .capturing:
+                // ⇧ toggling mid-capture does NOT change the profile —
+                // it was locked in when capture started.
+                break
             }
-        } else { // keyUp
-            guard downAt > 0 else { return }
-            let wasRewrite = heldRewrite
-            let held = now - downAt
-            downAt = 0
-            pollTimer?.invalidate(); pollTimer = nil
-            heldRewrite = false
-            DispatchQueue.main.async { [weak self] in self?.onHotkey?(false, wasRewrite) }
-            _ = held // tap-vs-hold resolved in SessionController
+            state = next
+            emit(intent)
+        case .keyDown:
+            let (intent, next) = Self.reduce(state: state, type: type, flags: flags)
+            if next != .pending { dwellTimer?.invalidate(); dwellTimer = nil }
+            state = next
+            emit(intent)
+        default:
+            break
         }
+    }
+
+    /// Dwell: capture begins only if ⌃⌘ are STILL held when it fires.
+    private func armDwell() {
+        dwellTimer?.invalidate()
+        dwellTimer = Timer.scheduledTimer(withTimeInterval: AppInfo.holdDwell, repeats: false) { [weak self] _ in
+            guard let self = self, case .pending = self.state else { return }
+            self.state = .capturing
+            self.capturedRewrite = Self.isRewrite(self.lastFlags)
+            self.emit(.start(rewrite: self.capturedRewrite))
+        }
+    }
+
+    private var lastFlags: CGEventFlags = []
+
+    private func emit(_ intent: Intent?) {
+        guard let intent = intent else { return }
+        DispatchQueue.main.async { [weak self] in self?.onIntent?(intent) }
     }
 }
