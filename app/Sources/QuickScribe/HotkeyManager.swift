@@ -30,6 +30,8 @@ final class HotkeyManager {
     func _handleForTesting(type: CGEventType, event: CGEvent) { handle(type: type, event: event) }
 
     private var eventTap: CFMachPort?
+    /// True once tapCreate succeeded AND the tap was enabled on a runloop.
+    private(set) var tapLive: Bool = false
     private var state: State = .idle
     private var pendingRewrite = false
     private var capturedRewrite = false
@@ -110,7 +112,17 @@ final class HotkeyManager {
 
     // MARK: - Event tap wiring
 
-    func start() {
+    /// Returns true only if a live event tap was created AND enabled.
+    /// false = hotkeys are DEAD (almost always: Accessibility grant missing,
+    /// e.g. every ad-hoc rebuild resets TCC). Callers MUST surface this —
+    /// a silent idle with a normal-looking menu icon is a defect (AC6).
+    @discardableResult
+    func start() -> Bool {
+        // Already armed? Re-arm idempotently (remove old source first).
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: true)
+            return true
+        }
         let mask: CGEventMask =
             (1 << CGEventType.flagsChanged.rawValue) |
             (1 << CGEventType.keyDown.rawValue)
@@ -124,12 +136,16 @@ final class HotkeyManager {
                                            options: .listenOnly, eventsOfInterest: mask,
                                            callback: callback, userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
             NSLog("QuickScribe: could not create event tap (Accessibility permission?)")
-            return
+            tapLive = false
+            return false
         }
         eventTap = tap
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        tapLive = true
+        NSLog("QuickScribe: event tap live (hold \(AppInfo.holdLabel) armed)")
+        return true
     }
 
     private func handle(type: CGEventType, event: CGEvent) {

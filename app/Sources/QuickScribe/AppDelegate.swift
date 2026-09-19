@@ -22,36 +22,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.rebuildMenu()   // keep the hands-free toggle label truthful
         }
 
-        requestPermissions { [weak self] in
-            self?.session.activate()
-            self?.probeSidecar()
+        requestMic { [weak self] in
+            guard let self = self else { return }
+            self.probeSidecar()
+            self.ensureAccessibility()
         }
     }
+
+    /// True only when the global event tap is live (hotkeys actually work).
+    private var hotkeysLive: Bool { session.hotkeys.tapLive }
 
     // MARK: - Permissions onboarding (brief AC6: requested once, clear)
 
-    private func requestPermissions(done: @escaping () -> Void) {
-        let needMic = AVCaptureDevice.authorizationStatus(for: .audio) != .authorized
-        let axAX = AXIsProcessTrusted()
-
-        if needMic {
-            AVCaptureDevice.requestAccess(for: .audio) { _ in
-                DispatchQueue.main.async { self.requestAX(done: done) }
-            }
-        } else {
-            requestAX(done: done)
+    /// Accessibility can NEVER prompt (tccd: "Service kTCCServiceAccessibility
+    /// does not allow prompting") — AXIsProcessTrustedWithOptions shows no
+    /// dialog, it only registers the app in the settings list. Old code
+    /// assumed a dialog and silently activated a dead tap. Now: open the
+    /// pane ONCE, poll, and show honest state throughout (icon + overlay).
+    private func ensureAccessibility() {
+        if session.activate() {
+            statusItem.button?.title = "🎙︎"
+            statusItem.button?.toolTip = "\(AppInfo.displayName): ready — hold \(AppInfo.holdLabel)"
+            rebuildMenu()
+            return
         }
-        _ = axAX
+        overlayWarn("Accessibility off — hotkeys disabled. Enable QuickScribe in System Settings.")
+        openAccessibilityPaneOnce()
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
+            Task { @MainActor in
+                guard let self = self else { t.invalidate(); return }
+                if AXIsProcessTrusted() {
+                    if self.session.activate() {
+                        t.invalidate()
+                        self.statusItem.button?.title = "🎙︎"
+                        self.statusItem.button?.toolTip = "\(AppInfo.displayName): ready — hold \(AppInfo.holdLabel)"
+                        self.overlayWarn("Hotkeys live ✓  Hold \(AppInfo.holdLabel) to talk", autoHideAfter: 3)
+                    } else {
+                        // Trusted but tap refused (tccd cache race): force an
+                        // app relaunch so the grant is re-evaluated fresh.
+                        t.invalidate()
+                        self.overlayWarn("Grant recorded — relaunch QuickScribe to arm hotkeys", autoHideAfter: 5)
+                    }
+                }
+                self.rebuildMenu()
+            }
+        }
     }
 
-    private func requestAX(done: @escaping () -> Void) {
-        if AXIsProcessTrusted() { done(); return }
-        // Prompt once with the system dialog; poll until granted (hotkeys
-        // stay disabled until then — overlay states still work).
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(opts)
-        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { t in
-            if AXIsProcessTrusted() { t.invalidate(); done() }
+    private var didOpenAXPane = false
+    private func openAccessibilityPaneOnce() {
+        guard !didOpenAXPane else { return }
+        didOpenAXPane = true
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func overlayWarn(_ msg: String, autoHideAfter: TimeInterval? = nil) {
+        session.showOverlay(.error(msg), autoHide: autoHideAfter)
+    }
+
+    private func requestMic(done: @escaping () -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            done()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { _ in
+                DispatchQueue.main.async { done() }
+            }
+        default:
+            // Denied previously — mic prompt will NOT re-appear; say so.
+            overlayWarn("Mic denied — enable in System Settings → Privacy → Microphone", autoHideAfter: 5)
+            done()
         }
     }
 
@@ -72,6 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildMenu() {
         let menu = NSMenu()
+
+        if !hotkeysLive {
+            let dead = NSMenuItem(title: "⚠ Hotkeys off — grant Accessibility", action: #selector(openAXSettings), keyEquivalent: "")
+            dead.target = self
+            menu.addItem(dead)
+        }
 
         let how = NSMenuItem(title: "Hold \(AppInfo.holdLabel) to talk, release to insert", action: nil, keyEquivalent: "")
         how.isEnabled = false
@@ -105,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quit)
 
         statusItem.menu = menu
+    }
+
+    @objc private func openAXSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func selectPolish() { profile = "polish"; session.defaultProfile = "polish"; rebuildMenu() }

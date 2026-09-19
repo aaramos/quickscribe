@@ -273,6 +273,9 @@ final class SessionController {
     }
 
     // Expose overlay + hotkey start to the app delegate.
-    func activate() { hotkeys.start() }
+    /// Returns true only if the event tap is live — the delegate must NOT
+    /// pretend hotkeys work otherwise (dead-listener defect, t_49e2302f).
+    @discardableResult
+    func activate() -> Bool { hotkeys.start() }
     func showOverlay(_ s: OverlayController.State, autoHide: TimeInterval? = nil) { overlay.show(s, autoHideAfter: autoHide) }
 }
