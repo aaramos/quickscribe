@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Assembles QuickScribe.app — a renameable menu-bar bundle.
+# App display name + bundle id live in ONE place:
+#   Sources/QuickScribe/AppInfo.swift (displayName, bundleID)
+# This script extracts them; renaming the app = edit AppInfo.swift, rebuild.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+APP_NAME=$(sed -n 's/.*static let displayName = "\(.*\)"/\1/p' Sources/QuickScribe/AppInfo.swift)
+BUNDLE_ID=$(sed -n 's/.*static let bundleID = "\(.*\)"/\1/p' Sources/QuickScribe/AppInfo.swift)
+[[ -n "$APP_NAME" && -n "$BUNDLE_ID" ]] || { echo "FATAL: could not read name/bundle id from AppInfo.swift" >&2; exit 1; }
+
+echo "==> swift build -c release"
+swift build -c release
+
+BIN=".build/release/QuickScribe"
+APP="build/${APP_NAME}.app"
+CONTENTS="$APP/Contents"
+MACOS="$CONTENTS/MacOS"
+RES="$CONTENTS/Resources"
+
+echo "==> assembling $APP"
+rm -rf "$APP"
+mkdir -p "$MACOS" "$RES"
+cp "$BIN" "$MACOS/$APP_NAME"
+chmod +x "$MACOS/$APP_NAME"
+
+cat > "$CONTENTS/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>              <string>${APP_NAME}</string>
+    <key>CFBundleDisplayName</key>      <string>${APP_NAME}</string>
+    <key>CFBundleExecutable</key>       <string>${APP_NAME}</string>
+    <key>CFBundleIdentifier</key>       <string>${BUNDLE_ID}</string>
+    <key>CFBundlePackageType</key>      <string>APPL</string>
+    <key>CFBundleShortVersionString</key> <string>1.0</string>
+    <key>CFBundleVersion</key>          <string>1</string>
+    <key>LSMinimumSystemVersion</key>   <string>14.0</string>
+    <key>LSUIElement</key>              <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>${APP_NAME} records your voice for local dictation. Audio goes only to the local sidecar on 127.0.0.1.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>${APP_NAME} pastes dictated text into the app you are using.</string>
+</dict>
+</plist>
+PLIST
+
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+# Ad-hoc by default. To keep TCC (Mic/Accessibility) grants stable across
+# rebuilds, create a "QuickScribe Dev" self-signed code-signing identity in
+# Keychain Access once, then rebuild with CODESIGN_IDENTITY="QuickScribe Dev".
+
+ENT_FILE="$(mktemp).entitlements"
+cat > "$ENT_FILE" <<ENT
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key> <true/>
+    <key>com.apple.security.automation.apple-events</key> <true/>
+</dict>
+</plist>
+ENT
+
+echo "==> codesign (${CODESIGN_IDENTITY:-ad-hoc})"
+codesign --force --entitlements "$ENT_FILE" \
+    -s "${CODESIGN_IDENTITY:-"-"}" "$APP"
+rm -f "$ENT_FILE"
+
+echo "==> built: $(cd build && pwd)/${APP_NAME}.app"
+codesign -dv "$APP" 2>&1 | sed -n '1,4p'
