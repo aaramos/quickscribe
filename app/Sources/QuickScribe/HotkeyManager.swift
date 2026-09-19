@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 
@@ -121,7 +122,8 @@ final class HotkeyManager {
         // Already armed? Re-arm idempotently (remove old source first).
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
-            return true
+            tapLive = AXIsProcessTrusted()
+            return tapLive
         }
         let mask: CGEventMask =
             (1 << CGEventType.flagsChanged.rawValue) |
@@ -142,10 +144,18 @@ final class HotkeyManager {
         eventTap = tap
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+        // tapEnable returns Void — its result CANNOT be checked. Without
+        // Accessibility, tapCreate can still succeed and the tap then sits
+        // dead, receiving nothing (silent-listener defect). The honest
+        // liveness signal available in-process is AXIsProcessTrusted().
         CGEvent.tapEnable(tap: tap, enable: true)
-        tapLive = true
-        NSLog("QuickScribe: event tap live (hold \(AppInfo.holdLabel) armed)")
-        return true
+        tapLive = AXIsProcessTrusted()
+        if tapLive {
+            NSLog("QuickScribe: event tap live (hold \(AppInfo.holdLabel) armed)")
+        } else {
+            NSLog("QuickScribe: event tap created but ENABLE FAILED — hotkeys dead (Accessibility grant missing?)")
+        }
+        return tapLive
     }
 
     private func handle(type: CGEventType, event: CGEvent) {

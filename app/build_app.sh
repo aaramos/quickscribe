@@ -55,10 +55,10 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
-# Ad-hoc by default. To keep TCC (Mic/Accessibility) grants stable across
-# rebuilds, create a "QuickScribe Dev" self-signed code-signing identity in
-# Keychain Access once, then rebuild with CODESIGN_IDENTITY="QuickScribe Dev".
+# Stable dev identity by default: ad-hoc signs a NEW cdhash every rebuild,
+# which resets TCC (Mic/Accessibility) grants and kills the hotkey tap.
+# "Pure Voice Local Development" keeps grants stable across rebuilds.
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY-Pure Voice Local Development}"
 
 ENT_FILE="$(mktemp).entitlements"
 cat > "$ENT_FILE" <<ENT
