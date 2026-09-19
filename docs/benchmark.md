@@ -131,5 +131,7 @@ True hotkey-release→visible-insert TTI requires the owner live demo (TCC Allow
 | sidecar degrade | `launchctl stop com.quickscribe.sidecar` | /health connection-refused (curl 7); app pid 41694 alive, STAT S, zero crash reports in DiagnosticReports; `launchctl start` → healthy in ~6 s |
 | AVAudioEngine capture | inputNode tap, same class as app | tap streaming ok (48 kHz stereo in → app resamples to 16k mono) |
 | Accessibility | AXIsProcessTrusted | true (already granted system-wide) |
+| Clipboard-restore mechanism | compiled Insertion.swift (paste-CmdV stubbed, no keystrokes synthesized) | snapshot→write→restore proven: pre-set string restored byte-exact, marker guard ok |
+| History wiring | GET /history + copyClicked code review | endpoint serves rows; click handler writes .polished to pasteboard (AC7) |
 
-Live demo remaining once owner is at the Studio: overlay pill partials, 4-app insert (Notes/TextEdit/Chrome/Terminal), tap-mode, Esc-cancel-clipboard-restore, history click-to-copy, Rewrite profile switch — then real hotkey→insert TTI replaces this proxy table.
+Live demo remaining once owner is at the Studio (on the re-cut demo card, new bindings): overlay pill partials, 4-app insert (Notes/TextEdit/Chrome/Terminal), tap-mode, Esc-cancel-clipboard-restore, history click-to-copy, Rewrite profile switch — then real hotkey→insert TTI replaces this proxy table. Old ⌘⌥Space demo scope retired per PM (binding collision).
