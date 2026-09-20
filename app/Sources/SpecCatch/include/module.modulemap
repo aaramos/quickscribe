@@ -1,0 +1,4 @@
+module SpecCatch {
+    umbrella header "SpecCatch.h"
+    export *
+}

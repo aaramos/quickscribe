@@ -135,3 +135,16 @@ True hotkey-release→visible-insert TTI requires the owner live demo (TCC Allow
 | History wiring | GET /history + copyClicked code review | endpoint serves rows; click handler writes .polished to pasteboard (AC7) |
 
 Live demo remaining once owner is at the Studio (on the re-cut demo card, new bindings): overlay pill partials, 4-app insert (Notes/TextEdit/Chrome/Terminal), tap-mode, Esc-cancel-clipboard-restore, history click-to-copy, Rewrite profile switch — then real hotkey→insert TTI replaces this proxy table. Old ⌘⌥Space demo scope retired per PM (binding collision).
+
+## Live full-session TTI (t_955de3e6, REAL app stack + REAL mic path)
+
+Measured 2026-09-19 by `app/e2e-proof/main.swift`: compiles the actual SessionController/AudioCapture/HotkeyManager/Insertion/SidecarClient, posts real CGEvent ⌃⌘ hold/release into the system (real event tap), speaks TTS into BlackHole (default in+out routed), live Whisper STT + Qwen polish against the live sidecar. TTI = last phase-change (hotkey release) → history row lands. Insert leg (⌘V into a GUI target) still gated on owner unlock — numbers below are release→history, which bounds TTI from above by the paste dispatch only.
+
+| Scenario | Session | TTI (release→history) | Result |
+|---|---|---|---|
+| polish profile, push-to-talk | S1 | 1.61 s | history ✓, clipboard restore ✓ |
+| rewrite profile (⌃⌘⇧) | S2 | 1.52 s | history ✓, profile=rewrite in row ✓ |
+| sidecar −9 mid-capture | S4 | n/a | no insert, no crash (expect ✓) |
+| recovery after relaunch | S5 | 1.53 s | history ✓ within ~1.5 s of healthy |
+
+Cross-checks: direct-asset /transcribe 250 ms; loopback-captured playback → identical transcription; degrade warning "polish degraded (LLM unavailable)" surfaced while oMLX backend was down (restarted via `open -a oMLX.app`). Defect found+fixed during this run: silent-tail chunk (empty 200 success) was mis-accounted as a chunk failure in `sendChunk` — now only failed requests count (SessionController.swift).

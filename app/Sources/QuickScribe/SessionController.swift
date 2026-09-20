@@ -157,7 +157,9 @@ final class SessionController {
                 if let text = text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     self.partialText = self.join(self.partialText, text)
                     if self.mode != .idle { self.overlay.show(.partial(self.partialText)) }
-                } else if !partial || self.mode == .idle {
+                } else if text == nil {
+                    // Only a failed REQUEST counts as a chunk failure; an empty
+                    // success (silence tail) is normal — t_955de3e6.
                     self.chunkFails += 1
                 }
                 if let (pwav, _) = self.pendingChunk {
