@@ -148,3 +148,18 @@ Measured 2026-09-19 by `app/e2e-proof/main.swift`: compiles the actual SessionCo
 | recovery after relaunch | S5 | 1.53 s | history ✓ within ~1.5 s of healthy |
 
 Cross-checks: direct-asset /transcribe 250 ms; loopback-captured playback → identical transcription; degrade warning "polish degraded (LLM unavailable)" surfaced while oMLX backend was down (restarted via `open -a oMLX.app`). Defect found+fixed during this run: silent-tail chunk (empty 200 success) was mis-accounted as a chunk failure in `sendChunk` — now only failed requests count (SessionController.swift).
+
+## Real-world per-app TTI (t_955de3e6 AC6, REAL GUI inserts)
+
+Measured 2026-09-19 22:17 PDT by `app/perapp-proof/` (harness `main.swift` + AX focus helper `axfocus.swift` + `target.html`): real app stack compiled in, real CGEvent ⌃⌘ hold into the live event tap, TTS→BlackHole mic path, live Whisper STT + Qwen polish, REAL ⌘V paste into a focused editor, token-match verified in the target document itself. TTI = hotkey release → token present in the app's document (AX read). Clipboard pre-set per run; restore verified per run.
+
+| App | Runs | TTI (s) | TTI avg | Insert verified by | Clipboard restored |
+|---|---|---|---|---|---|
+| TextEdit | 2 | 1.83 s, 1.89 s | 1.86 s | token in AX-read doc | ✓ |
+| Notes | 2 | 2.46 s, 2.61 s | 2.54 s | token in AX-read doc | ✓ |
+| Chrome | 2 | 2.95 s, 3.05 s | 3.00 s | token in AX-read doc | ✓ |
+| Terminal | 2 | 2.29 s, 2.43 s | 2.36 s | token in AX-read doc | ✓ |
+
+P50 across all 8 sessions: 2.36 s (all ≤3 s). Proof: each session spoke a UNIQUE utterance whose token (e.g. "nina", "castle", "captain") appears ONLY in that run's speech; insertion accepted only on token match inside the target app's own document (AX value read / AppleScript doc read). Chrome web-content AX unlocked via AXManualAccessibility; Notes editor focused via ⌘N + AXTextArea focus.
+
+Evidence: evidence/t_955de3e6/perapp-run-green.log + perapp-journal.txt. Previous release→history bound table above stays as the pipeline-only measurement.

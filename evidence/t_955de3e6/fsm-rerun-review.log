@@ -1,0 +1,33 @@
+T1: hold ⌃⌘ starts capture, release stops
+  PASS: ⌃ alone does not start
+  PASS: inside dwell: no start yet
+  PASS: after dwell ~0.15s: start(polish)
+  PASS: releasing ⌃ (⌘ still down) stops
+  PASS: remaining ⌘ release emits nothing further
+T2: ⌃⌘F does NOT trigger capture
+  PASS: ⌃⌘F keyDown inside dwell aborts pending start
+  PASS: no intents across the whole ⌃⌘F gesture
+T3: key mid-capture cancels (no insert)
+  PASS: capture started
+  PASS: mid-capture keyDown → cancel intent
+  PASS: modifier release after cancel emits nothing (no insert)
+T4: ⌃⌘⇧ exercises Rewrite; profile locked at start
+  PASS: inside dwell: no start yet
+  PASS: ⇧ released inside dwell: still pending, no intent
+  PASS: ⇧ released before dwell → profile polish (profile is read at FIRE time, by design)
+  PASS: stop carries the locked profile (polish — ⇧ was up at fire)
+T4b: ⌃⌘⇧ dwell fires with ⇧ down; early ⇧ release keeps rewrite
+  PASS: ⌃⌘⇧ dwell → start(rewrite)
+  PASS: ⇧ release mid-capture: no intent
+  PASS: stop carries rewrite even after ⇧ released first
+T5: ⌃⌘Space passes through
+  PASS: ⌃⌘Space and ⌃⌘Q inside dwell never arm a start
+T6: ⌃⌘← passes through
+  PASS: ⌃⌘← keyDown inside dwell aborts pending start
+  PASS: no intents across the whole ⌃⌘← gesture
+T7: Esc mid-capture cancels (nothing inserted)
+  PASS: capture started
+  PASS: Esc keyDown mid-capture → cancel intent
+  PASS: modifier release after Esc-cancel emits no stop (nothing inserted)
+
+ALL PASS (7 scenarios)
