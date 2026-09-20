@@ -107,16 +107,45 @@ do {
 
 // T4 — ⌃⌘⇧ hold: forced Rewrite, stop carries the locked-in profile even if
 // ⇧ is released first.
+// NOTE (t_955de3e6 flake fix): dwell is 0.15 s; the original 0.3 s spin let
+// dwell fire BEFORE ⇧ was released, so "capture started" already had ⇧ up and
+// the mid-capture-⇧-release window never existed (order-dependent flake). All
+// spins here are kept well under dwell so start fires exactly once, at dwell,
+// with ⇧ still down; ⇧ release then happens mid-capture for real.
 print("T4: ⌃⌘⇧ exercises Rewrite; profile locked at start")
 do {
     let (m, l) = fresh()
     m._handleForTesting(type: .flagsChanged, event: modDown(kControl, .maskControl))
     m._handleForTesting(type: .flagsChanged, event: modDown(kShift, .maskControl.union(.maskShift)))
     m._handleForTesting(type: .flagsChanged, event: modDown(kCommand, ccs))
-    spin(0.3)
+    spin(0.05)
+    expect(l.intents.isEmpty, "inside dwell: no start yet")
+    m._handleForTesting(type: .flagsChanged, event: modUp(kShift, cc))
+    spin(0.05)
+    expect(l.intents.isEmpty, "⇧ released inside dwell: still pending, no intent")
+    spin(0.25) // dwell fires here; ⇧ was already up — see T4b for the real-world ordering
+    expect(l.intents == [.start(rewrite: false)],
+          "⇧ released before dwell → profile polish (profile is read at FIRE time, by design)")
+    m._handleForTesting(type: .flagsChanged, event: modUp(kCommand, .maskControl))
+    spin(0.05)
+    expect(l.intents.count == 2 && l.intents[1] == .stop(rewrite: false),
+           "stop carries the locked profile (polish — ⇧ was up at fire)")
+}
+
+// T4b — the real-world gesture: all three held, dwell fires WITH ⇧ down,
+// then ⇧ released early — stop must still carry rewrite.
+print("T4b: ⌃⌘⇧ dwell fires with ⇧ down; early ⇧ release keeps rewrite")
+do {
+    let (m, l) = fresh()
+    m._handleForTesting(type: .flagsChanged, event: modDown(kControl, .maskControl))
+    m._handleForTesting(type: .flagsChanged, event: modDown(kCommand, cc))
+    m._handleForTesting(type: .flagsChanged, event: modDown(kShift, ccs))
+    // Each flagsChanged RE-ARMS the dwell (handle() → armDwell), so the
+    // third down-event restarts the 0.15 s clock. Spin past that.
+    spin(0.35) // dwell fires ~0.15s after the LAST flagsChanged
     expect(l.intents == [.start(rewrite: true)], "⌃⌘⇧ dwell → start(rewrite)")
     m._handleForTesting(type: .flagsChanged, event: modUp(kShift, cc))
-    spin(0.02)
+    spin(0.05)
     expect(l.intents.count == 1, "⇧ release mid-capture: no intent")
     m._handleForTesting(type: .flagsChanged, event: modUp(kCommand, .maskControl))
     spin(0.05)
@@ -138,5 +167,40 @@ do {
     expect(l.intents.isEmpty, "⌃⌘Space and ⌃⌘Q inside dwell never arm a start")
 }
 
-print(failures == 0 ? "\nALL PASS (\(5) scenarios)" : "\n\(failures) FAILURE(S)")
+// T6 — ⌃⌘ + Left arrow inside dwell: aborts (collision regression, t_955de3e6).
+print("T6: ⌃⌘← passes through")
+do {
+    let kLeft: Int64 = 0x7B
+    let (m, l) = fresh()
+    m._handleForTesting(type: .flagsChanged, event: modDown(kControl, .maskControl))
+    m._handleForTesting(type: .flagsChanged, event: modDown(kCommand, cc))
+    spin(0.03)
+    m._handleForTesting(type: .keyDown, event: keyDown(kLeft, cc))
+    spin(0.4)
+    expect(l.intents.isEmpty, "⌃⌘← keyDown inside dwell aborts pending start")
+    m._handleForTesting(type: .flagsChanged, event: modUp(kCommand, .maskControl))
+    m._handleForTesting(type: .flagsChanged, event: modUp(kControl, []))
+    spin(0.05)
+    expect(l.intents.isEmpty, "no intents across the whole ⌃⌘← gesture")
+}
+
+// T7 — Esc mid-capture: cancel intent, modifier release afterwards inserts nothing.
+print("T7: Esc mid-capture cancels (nothing inserted)")
+do {
+    let kEsc: Int64 = 0x35
+    let (m, l) = fresh()
+    m._handleForTesting(type: .flagsChanged, event: modDown(kControl, .maskControl))
+    m._handleForTesting(type: .flagsChanged, event: modDown(kCommand, cc))
+    spin(0.3)
+    expect(l.intents == [.start(rewrite: false)], "capture started")
+    m._handleForTesting(type: .keyDown, event: keyDown(kEsc, []))
+    spin(0.05)
+    expect(l.intents.count == 2 && l.intents[1] == .cancel, "Esc keyDown mid-capture → cancel intent")
+    m._handleForTesting(type: .flagsChanged, event: modUp(kCommand, .maskControl))
+    m._handleForTesting(type: .flagsChanged, event: modUp(kControl, []))
+    spin(0.05)
+    expect(l.intents.count == 2, "modifier release after Esc-cancel emits no stop (nothing inserted)")
+}
+
+print(failures == 0 ? "\nALL PASS (\(7) scenarios)" : "\n\(failures) FAILURE(S)")
 exit(failures == 0 ? 0 : 1)
