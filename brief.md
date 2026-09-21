@@ -4,7 +4,7 @@
 A menu-bar dictation app for macOS: tap a global hotkey, speak, and polished text types itself into whatever app has focus — fully local, built for speed.
 
 ## Who it's for
-Primary: the owner of this Mac Studio (M3 Ultra, 256GB, oMLX serving local LLMs). Power user who dictates constantly into chat fields, terminals, editors, and email.
+Primary: the owner of an Apple Silicon desktop (256GB, oMLX serving local LLMs). Power user who dictates constantly into chat fields, terminals, editors, and email.
 Secondary (door open, not scope): other Mac users — the build must stay renameable/packageable, but v1 ships for this machine only.
 
 ## The problem

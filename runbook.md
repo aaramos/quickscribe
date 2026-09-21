@@ -8,7 +8,7 @@ Read this before touching anything. Decisions here are settled — do not re-lit
 - `backend` owns the benchmark harness too (lives in sidecar repo tree, card A deliverable)
 - `gtm` → README + launch copy (card C, parents = A+B)
 
-## Workspace layout (all relative to $REPO_ROOT/)
+## Workspace layout (all relative to the repo root, i.e. this directory)
 ```
 sidecar/            # backend lane
   server.py         # FastAPI app
