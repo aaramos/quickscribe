@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QuickScribe — Icon &amp; Waveform Concepts (preview only)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* ============================================================
+   QuickScribe concept board — DESIGN CONCEPTS ONLY.
+   Themed via the standard CSS vars below (mirrors the app's
+   overlay pill palette: #141414 /0.92 surface, white/14 border,
+   system red/yellow/green/orange/gray state dots).
+   Nothing here is wired into the shipping app.
+   ============================================================ */
+:root {
+  --bg: #0e0f12;
+  --surface: rgba(20,20,20,.92);      /* app overlay pill bg  */
+  --surface-2: rgba(255,255,255,.05);
+  --border: rgba(255,255,255,.14);    /* app overlay border   */
+  --text: #f2f2f4;
+  --text-2: #9a9aa2;
+  --rec: #ff453a;                       /* systemRed            */
+  --proc: #ffd60a;                      /* systemYellow         */
+  --ok: #32d74b;                        /* systemGreen          */
+  --deg: #ff9f0a;                      /* systemOrange         */
+  --off: #8e8e93;                      /* systemGray           */
+  --accent: #0a84ff;
+  --radius-pill: 28px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); padding-bottom: 120px; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+h1 { font-size: 26px; letter-spacing: -.02em; margin-bottom: 6px; }
+h2 { font-size: 19px; margin: 44px 0 4px; letter-spacing: -.01em; }
+.sub { color: var(--text-2); margin-bottom: 8px; }
+.note { color: var(--text-2); font-size: 13px; margin-bottom: 20px; }
+.badge-preview { display:inline-block; font-size:11px; font-weight:600; letter-spacing:.08em;
+  color:#ffd60a; border:1px solid rgba(255,214,10,.4); border-radius:6px; padding:2px 8px; margin-bottom:14px; }
+
+/* --- simulated macOS menu bar strip --- */
+.menubar { display:flex; align-items:center; height:26px; background:#1c1c1e;
+  border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:0 10px; margin:14px 0 6px; }
+.menubar .mb-time { margin-left:auto; font-size:12px; color:#d0d0d4; }
+.menubar .mb-item { font-size:12px; color:#d0d0d4; margin-right:14px; }
+.mb-icon { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; margin-right:10px; }
+.mb-icon svg { width:16px; height:16px; }
+
+/* --- concept cards --- */
+.grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+@media (max-width:900px){ .grid{grid-template-columns:1fr;} }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px;
+  cursor:pointer; transition:border-color .15s, box-shadow .15s; position:relative; }
+.card:hover { border-color:rgba(255,255,255,.3); }
+.card.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 0 24px rgba(10,132,255,.18); }
+.card .pick-mark { position:absolute; top:12px; right:12px; width:20px; height:20px; border-radius:50%;
+  border:1.5px solid var(--border); display:flex; align-items:center; justify-content:center;
+  font-size:11px; color:var(--text-2); transition:.15s; }
+.card.selected .pick-mark { background:var(--accent); border-color:var(--accent); color:#fff; }
+.card h3 { font-size:15px; margin-bottom:2px; }
+.card .glyph-meta { font-size:12px; color:var(--text-2); margin-bottom:12px; }
+.card .glyph-meta code { color:#cfe3ff; background:rgba(10,132,255,.12); border-radius:4px; padding:0 4px; font-size:11px; }
+.zoom-stage { display:flex; align-items:center; gap:22px; }
+.glyph-22 { width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
+.glyph-22 svg { width:16px; height:16px; }
+.glyph-zoom { width:96px; height:96px; display:flex; align-items:center; justify-content:center; }
+.glyph-zoom svg { width:96px; height:96px; }
+.size-label { font-size:10px; color:var(--text-2); text-align:center; margin-top:4px; }
+.icon-stroke { stroke:#e8e8ea; stroke-width:1.7; stroke-linecap:round; fill:none; }
+.icon-fill { fill:#e8e8ea; }
+.card.active-rec .icon-stroke { stroke:var(--rec); }
+.card.active-rec .icon-fill { fill:var(--rec); }
+
+/* icon A animated bars */
+.a-bar { transform-origin:center; animation:pulsebar 1.1s ease-in-out infinite; }
+.a-bar:nth-child(2){ animation-delay:.18s; } .a-bar:nth-child(3){ animation-delay:.36s; }
+@keyframes pulsebar { 0%,100%{ transform:scaleY(.45);} 50%{ transform:scaleY(1);} }
+/* icon B arcs fade */
+.b-arc { animation:arc 1.6s ease-out infinite; }
+.b-arc:nth-of-type(3){ animation-delay:.4s; }
+@keyframes arc { 0%{opacity:.15;} 30%{opacity:1;} 100%{opacity:.15;} }
+
+/* --- overlay pill mocks --- */
+.mock-area { background:repeating-linear-gradient(45deg,#131417,#131417 12px,#15161a 12px,#15161a 24px);
+  border-radius:12px; padding:22px 14px; display:flex; flex-direction:column; align-items:center; gap:14px; }
+.pill { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-pill);
+  color:var(--text); display:flex; align-items:center; }
+.pill .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+.pill .txt { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pill .device { color:var(--text-2); font-size:12px; margin-left:6px; }
+.fullwidth { width:100%; max-width:520px; border-radius:16px; padding:10px 14px; }
+.fullwidth canvas { width:100%; height:34px; display:block; }
+.fullwidth .txt { font-size:13px; margin-top:4px; min-height:18px; color:var(--text); }
+.compact { height:34px; padding:0 14px 0 10px; gap:8px; }
+.compact canvas { width:72px; height:18px; }
+.compact .txt { font-size:13px; max-width:210px; }
+.ring-stage { position:relative; width:130px; height:130px; display:flex; align-items:center; justify-content:center; }
+.ring-stage canvas { position:absolute; inset:0; }
+.ring-txt { font-size:13px; text-align:center; max-width:460px; min-height:18px; }
+.pill-label { font-size:11px; color:var(--text-2); }
+.pill.rec .dot { background:var(--rec); box-shadow:0 0 8px rgba(255,69,58,.7); }
+.pill.partial .dot { background:var(--rec); box-shadow:0 0 8px rgba(255,69,58,.7); }
+.pill.processing .dot { background:var(--proc); animation:spinpulse 1s ease-in-out infinite; }
+.pill.inserted .dot { background:var(--ok); }
+.pill.degraded .dot { background:var(--deg); }
+.pill.cancelled .dot, .pill.error .dot { background:var(--off); }
+.pill.idle { opacity:.55; }
+@keyframes spinpulse { 0%,100%{opacity:.4;} 50%{opacity:1;} }
+
+/* state chips */
+.states { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
+.chip { font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid var(--border);
+  color:var(--text-2); cursor:pointer; background:var(--surface-2); }
+.chip.on { color:#fff; border-color:transparent; }
+.chip.on.rec, .chip.on.partial { background:var(--rec); }
+.chip.on.processing { background:var(--proc); color:#000; }
+.chip.on.inserted { background:var(--ok); color:#000; }
+.chip.on.degraded { background:var(--deg); color:#000; }
+.chip.on.cancelled, .chip.on.error { background:var(--off); }
+.transition-note { font-size:11px; color:var(--text-2); margin-top:8px; }
+.verb { color:var(--accent); font-weight:600; }
+
+/* selection bar */
+.selbar { position:fixed; bottom:0; left:0; right:0; background:rgba(14,15,18,.95);
+  backdrop-filter:blur(14px); border-top:1px solid var(--border); padding:14px 24px;
+  display:flex; align-items:center; gap:14px; z-index:50; }
+.selbar .sel-txt { font-size:14px; }
+.selbar code { color:#cfe3ff; background:rgba(10,132,255,.14); padding:2px 8px; border-radius:6px; font-size:13px; }
+.selbar button { font:13px var(--font); padding:7px 14px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--text); cursor:pointer; margin-left:8px; }
+.selbar button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+.selbar button:hover { border-color:#fff; }
+#copied { font-size:12px; color:var(--ok); opacity:0; transition:.3s; }
+footer { margin-top:48px; font-size:12px; color:var(--text-2); border-top:1px solid var(--border); padding-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="badge-preview">CONCEPTS ONLY — NO PRODUCTION CODE TOUCHED</div>
+  <h1>QuickScribe — menu-bar icon &amp; live-waveform overlay</h1>
+  <p class="sub">3 icon concepts × 3 overlay concepts. Click a card to select; the bottom bar builds your pick prompt.</p>
+  <p class="note">All motion runs live at 60fps from a fake-audio generator with attack/release smoothing (same envelope math we'd use on real RMS). State chips under each mock cycle the app's real FSM: idle → recording → partials → processing → inserted, plus degraded / cancelled / error.</p>
+
+  <!-- simulated menu bar showing all three icons at real 22px scale -->
+  <div class="menubar" id="menubar">
+    <span class="mb-item">QuickScribe</span><span class="mb-item">File</span><span class="mb-item">Edit</span>
+    <span style="flex:1"></span>
+    <span class="mb-item" id="mb-active-label">A · rec</span>
+    <span class="mb-icon" id="mb-a"></span>
+    <span class="mb-icon" id="mb-b"></span>
+    <span class="mb-icon" id="mb-c"></span>
+    <span class="mb-time" id="mb-time">9:41 AM</span>
+  </div>
+  <p class="note" style="margin-bottom:0">↑ real menu-bar strip — each glyph at true 22px slot / 16pt glyph, monochrome.</p>
+
+  <h2>Part 1 — Menu-bar icon</h2>
+  <p class="sub">Owner note: current mic glyph is too detailed. Each concept below is monochrome, crisp at 16–22pt, shown live-animated (recording state) in the strip above.</p>
+  <div class="grid" id="icon-grid" data-grid="icons">
+
+    <div class="card selected active-rec" data-hermes-send="pick icon A" data-key="iconA">
+      <span class="pick-mark">✓</span>
+      <h3>A — Waveform pulse</h3>
+      <div class="glyph-meta">SF Symbol: <code>waveform.path.ecg</code> · alt <code>waveform</code> · custom path below</div>
+      <div class="zoom-stage">
+        <div><div class="glyph-22" data-icon="A"></div><div class="size-label">22px bar</div></div>
+        <div><div class="glyph-zoom" data-icon="A"></div><div class="size-label">zoomed</div></div>
+      </div>
+      <p class="transition-note">Three rounded bars, heartbeat cadence. Reads as "audio" at 16px even frozen. Lowest visual weight of the three.</p>
+    </div>
+
+    <div class="card active-rec" data-hermes-send="pick icon B" data-key="iconB">
+      <span class="pick-mark">✓</span>
+      <h3>B — Listening mark</h3>
+      <div class="glyph-meta">dot + expanding arcs · nearest SF Symbol <code>dot radiotower</code> ≈ <code>antenna.radiowaves.left.and.right</code> — custom path preferred</div>
+      <div class="zoom-stage">
+        <div><div class="glyph-22" data-icon="B"></div><div class="size-label">22px bar</div></div>
+        <div><div class="glyph-zoom" data-icon="B"></div><div class="size-label">zoomed</div></div>
+      </div>
+      <p class="transition-note">Solid anchor dot, two arcs breathing outward. Communicates "listening at you" rather than "microphone hardware". Distinct from Control Center's wifi/volume marks at this size.</p>
+    </div>
+
+    <div class="card active-rec" data-hermes-send="pick icon C" data-key="iconC">
+      <span class="pick-mark">✓</span>
+      <h3>C — Quill spark</h3>
+      <div class="glyph-meta">geometric four-point spark · SF Symbol <code>sparkle</code> · custom path below</div>
+      <div class="zoom-stage">
+        <div><div class="glyph-22" data-icon="C"></div><div class="size-label">22px bar</div></div>
+        <div><div class="glyph-zoom" data-icon="C"></div><div class="size-label">zoomed</div></div>
+      </div>
+      <p class="transition-note">The "write it for me" mark — abstract quill reduced to a concave diamond spark. leans AI-assistant, weakest "audio" cue, strongest brand personality.</p>
+    </div>
+  </div>
+
+  <details style="margin-top:10px">
+    <summary style="color:var(--text-2);font-size:12px;cursor:pointer">Exact vector paths used (custom template PDF candidates)</summary>
+    <pre style="font-size:11px;color:var(--text-2);overflow:auto;background:#131417;border-radius:8px;padding:12px;margin-top:8px">
+A (viewBox 0 0 22 22, stroke 1.7, caps round, fill none):
+  M 7 6.5 V 15.5   M 11 4 V 18   M 15 7.5 V 14.5
+
+B (viewBox 0 0 22 22):
+  circle cx 8 cy 11 r 2.2 (fill)
+  M 11.6 7.6 A 4.8 4.8 0 0 1 11.6 14.4
+  M 14.2 5.4 A 8 8 0 0 1 14.2 16.6   (stroke 1.7, caps round)
+
+C (viewBox 0 0 22 22, fill):
+  M 11 2.5 C 11.9 8.2 13.8 10.1 19.5 11 C 13.8 11.9 11.9 13.8 11 19.5 C 10.1 13.8 8.2 11.9 2.5 11 C 8.2 10.1 10.1 8.2 11 2.5 Z</pre>
+  </details>
+
+  <h2>Part 2 — Overlay pill with live waveform</h2>
+  <p class="sub">Every mock animates from the same fake-audio engine (glottal-pulse pseudo-speech, attack 60ms / release 240ms smoothing). Click state chips to pin a state, or let them auto-cycle.</p>
+
+  <div class="grid" data-grid="waveforms">
+
+    <!-- Waveform 1: full-width ticker -->
+    <div class="card" data-hermes-send="pick waveform 1" data-key="wf1">
+      <span class="pick-mark">✓</span>
+      <h3>1 — Full-width ticker</h3>
+      <div class="glyph-meta">mirrored waveform scrolls left; partial transcript lives underneath</div>
+      <div class="mock-area">
+        <div class="pill fullwidth" id="pill1">
+          <div style="width:100%">
+            <canvas id="cv1" height="34"></canvas>
+            <div class="txt" id="txt1">…</div>
+          </div>
+        </div>
+      </div>
+      <div class="states" data-for="1"></div>
+      <p class="transition-note">Max legibility while speaking; tallest footprint. <span class="verb">rec→partials</span> shows live inflection, <span class="verb">processing</span> flattens the wave into a scanning yellow line, <span class="verb">inserted</span> snaps to a flat green baseline + ✓.</p>
+    </div>
+
+    <!-- Waveform 2: compact pill -->
+    <div class="card" data-hermes-send="pick waveform 2" data-key="wf2">
+      <span class="pick-mark">✓</span>
+      <h3>2 — Compact pill</h3>
+      <div class="glyph-meta">live RMS bars leading, text trailing — smallest footprint</div>
+      <div class="mock-area">
+        <div class="pill compact" id="pill2">
+          <span class="dot"></span>
+          <canvas id="cv2" height="18"></canvas>
+          <span class="txt" id="txt2">…</span>
+        </div>
+      </div>
+      <div class="states" data-for="2"></div>
+      <p class="transition-note">Sits over code editors without covering lines. Bars stay readable at 18px tall; text ellipsizes hard — good for short bursts, weaker for long dictation.</p>
+    </div>
+
+    <!-- Waveform 3: pulse ring -->
+    <div class="card" data-hermes-send="pick waveform 3" data-key="wf3">
+      <span class="pick-mark">✓</span>
+      <h3>3 — Pulse ring</h3>
+      <div class="glyph-meta">ring radius tracks volume; text centered below</div>
+      <div class="mock-area">
+        <div class="ring-stage"><canvas id="cv3" width="260" height="260"></canvas></div>
+        <div class="ring-txt pill" id="pill3" style="border-radius:16px;padding:6px 16px;background:var(--surface)">…</div>
+      </div>
+      <div class="states" data-for="3"></div>
+      <p class="transition-note">Most "alive" — the ring breathes with inflection like Siri. Largest vertical footprint; text below competes with the ring for attention on long sentences.</p>
+    </div>
+  </div>
+
+  <footer>
+    Preview-only deliverable for card t_bdf8672e. Zero production-code changes; swift build untouched.
+    Icons are monochrome so they template correctly as <code>NSImage(isTemplate:)</code>; state colorization happens only in the overlay, matching the existing OverlayController palette.
+    Selection convention: every card carries <code>data-hermes-send</code>; the bottom bar composes e.g. <code>pick icon B and waveform 2</code>.
+  </footer>
+</div>
+
+<div class="selbar">
+  <span class="sel-txt">Your pick: <code id="sel-code">pick icon A and waveform 1</code></span>
+  <span id="copied">copied ✓</span>
+  <span style="flex:1"></span>
+  <button id="btn-copy">Copy prompt</button>
+  <button class="primary" id="btn-send" data-hermes-send>Send to Hermes</button>
+</div>
+
+<script>
+'use strict';
+/* preview isolation: #only=iconA etc. shows a single card (used for evidence screenshots) */
+(function(){
+  const only = new URLSearchParams(location.hash.slice(1)).get('only');
+  if (!only) return;
+  document.querySelectorAll('.card').forEach(c=>{ if(c.dataset.key!==only) c.style.display='none'; });
+  document.querySelectorAll('h2,.sub,.note,.menubar,.badge-preview,footer').forEach(el=>el.style.display='none');
+  document.querySelector('.selbar').style.display='none';
+  document.querySelectorAll('.grid').forEach(g=>g.style.gridTemplateColumns='1fr');
+})();
+/* ---------- fake-audio engine: pseudo-speech envelope, 60fps ---------- */
+let t0 = performance.now();
+function env(t) {
+  // syllable rate ~3.5Hz + phrase pauses + micro-jitter, then attack/release smoothing
+  const syl = Math.pow(Math.max(0, Math.sin(t * 2 * Math.PI * 3.2)), 1.6);
+  const phrase = (Math.sin(t * 2 * Math.PI * 0.21) > -0.55) ? 1 : 0.06;   // ~5s phrase / pause
+  const word = 0.72 + 0.28 * Math.sin(t * 2 * Math.PI * 7.3 + Math.sin(t * 13));
+  const micro = 0.9 + 0.1 * Math.sin(t * 91.7);
+  const target = Math.min(1, syl * phrase * word * micro * 1.15);
+  return target;
+}
+// attack/release smoothed envelopes, per consumer
+const smoothed = {};
+function smoothedEnv(key, t) {
+  const target = env(t);
+  const prev = smoothed[key] ?? 0;
+  const coef = target > prev ? 0.35 : 0.08;   // fast attack ~60ms, slow release ~240ms @60fps
+  smoothed[key] = prev + (target - prev) * coef;
+  return smoothed[key];
+}
+
+/* ---------- icon SVGs ---------- */
+const ICONS = {
+  A: '<svg viewBox="0 0 22 22"><g class="icon-stroke" fill="none" stroke-width="1.7" stroke-linecap="round">' +
+     '<line class="a-bar" x1="7" y1="6.5" x2="7" y2="15.5"/>' +
+     '<line class="a-bar" x1="11" y1="4" x2="11" y2="18"/>' +
+     '<line class="a-bar" x1="15" y1="7.5" x2="15" y2="14.5"/></g></svg>',
+  B: '<svg viewBox="0 0 22 22"><circle class="icon-fill" cx="8" cy="11" r="2.2"/>' +
+     '<g class="icon-stroke" fill="none" stroke-width="1.7" stroke-linecap="round">' +
+     '<path class="b-arc" d="M 11.6 7.6 A 4.8 4.8 0 0 1 11.6 14.4"/>' +
+     '<path class="b-arc" d="M 14.2 5.4 A 8 8 0 0 1 14.2 16.6"/></g></svg>',
+  C: '<svg viewBox="0 0 22 22"><path class="icon-fill" d="M 11 2.5 C 11.9 8.2 13.8 10.1 19.5 11 C 13.8 11.9 11.9 13.8 11 19.5 C 10.1 13.8 8.2 11.9 2.5 11 C 8.2 10.1 10.1 8.2 11 2.5 Z"/></svg>'
+};
+document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
+document.getElementById('mb-a').innerHTML = ICONS.A;
+document.getElementById('mb-b').innerHTML = ICONS.B;
+document.getElementById('mb-c').innerHTML = ICONS.C;
+
+/* clock in menu bar */
+function tickClock(){ const d=new Date();
+  let h=d.getHours()%12||12; const m=String(d.getMinutes()).padStart(2,'0');
+  document.getElementById('mb-time').textContent = h+':'+m+' '+(d.getHours()<12?'AM':'PM'); }
+tickClock(); setInterval(tickClock, 10000);
+
+/* ---------- state machine mock ---------- */
+const STATES = ['idle','recording','partials','processing','inserted','degraded','cancelled','error'];
+const STATE_LABEL = { idle:'idle', recording:'rec', partials:'partials', processing:'processing',
+  inserted:'inserted', degraded:'degraded', cancelled:'cancelled', error:'error' };
+const PHRASES = [
+  'schedule a sync with the design team about',
+  'ship the release candidate tonight and',
+  'note to self: rotate the BlackHole default before the',
+  'pull request is ready for review once CI goes'
+];
+let phraseIdx = 0, typed = 0, lastState = '';
+const concept = {
+  1: { state:'recording', auto:true },
+  2: { state:'recording', auto:true },
+  3: { state:'recording', auto:true }
+};
+function setState(n, s) {
+  concept[n].state = s;
+  concept[n].auto = false;
+  if (s === 'partials') { typed = 0; }
+  renderChips(n);
+}
+function speakText() { return PHRASES[phraseIdx % PHRASES.length]; }
+
+/* ---------- canvases ---------- */
+function fit(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w*dpr) || cv._lastH !== h) {
+    cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); cv._lastH = h;
+    cv.getContext('2d').setTransform(dpr,0,0,dpr,0,0);
+  }
+  return { ctx: cv.getContext('2d'), w, h };
+}
+/* concept 1 buffer: scrolling mirrored waveform */
+const buf1 = new Array(96).fill(0);
+/* concept 2: 16-bar RMS meter */
+const bars2 = new Array(16).fill(0.1);
+let phase3 = 0;
+
+function draw(now) {
+  const t = (now - t0) / 1000;
+
+  /* menu-bar icon liveness: bar heights breathe (concept A) */
+  // CSS handles A/B; done.
+
+  const st1 = concept[1].state, st2 = concept[2].state, st3 = concept[3].state;
+
+  /* --- 1: full-width ticker --- */
+  {
+    const cv = document.getElementById('cv1'); const {ctx,w,h} = fit(cv);
+    const live = (st1==='recording'||st1==='partials');
+    if (live) { buf1.push(smoothedEnv('c1', t)); buf1.shift(); }
+    else if (st1==='processing') { for(let i=0;i<buf1.length;i++) buf1[i]*=0.96; }
+    else if (st1==='inserted')    { for(let i=0;i<buf1.length;i++) buf1[i]*=0.7; }
+    else                           { for(let i=0;i<buf1.length;i++) buf1[i]*=0.85; }
+    ctx.clearRect(0,0,w,h);
+    const bw = w / buf1.length, mid = h/2;
+    let color = '#e8e8ea';
+    if (st1==='processing') color = 'var(--proc)';
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue(
+      (st1==='processing')?'--proc':(st1==='inserted')?'--ok':(st1==='idle')?'--off':'--rec').trim() || color;
+    buf1.forEach((v,i)=>{
+      const amp = Math.max(1.5, v*(h*0.9));
+      ctx.fillRect(i*bw+1, mid-amp/2, bw-2, amp);
+    });
+    if (st1==='processing') {  // scanning line
+      const x = (t*140)%w;
+      ctx.fillStyle='rgba(255,214,10,.9)'; ctx.fillRect(x,0,2,h);
+    }
+    // text row
+    const el = document.getElementById('txt1');
+    if (st1==='partials'||st1==='recording') {
+      typed = Math.min(speakText().length, typed + (live?0.55:0));
+      el.textContent = speakText().slice(0, Math.floor(typed)) + (live?'▌':'');
+      if (st1==='recording' && typed >= speakText().length) { setState(1,'partials'); typed=0; }
+    } else if (st1==='processing') el.textContent = 'Transcribing…';
+    else if (st1==='inserted') el.textContent = '✓ Inserted';
+    else if (st1==='degraded') el.textContent = '! LLM down — inserted raw text';
+    else if (st1==='cancelled') el.textContent = '✕ Cancelled';
+    else if (st1==='error') el.textContent = '! Sidecar unreachable';
+    else el.textContent = '⌘ Option-S to dictation';
+    el.className = 'txt ' + st1;
+  }
+
+  /* --- 2: compact pill --- */
+  {
+    const cv = document.getElementById('cv2'); const {ctx,w,h} = fit(cv);
+    const live = (st2==='recording'||st2==='partials');
+    const e = live ? smoothedEnv('c2', t) : (st2==='processing' ? 0.12 : 0.05);
+    bars2.push(e*(0.5+0.5*Math.abs(Math.sin(t*9+Math.sin(t*23))))); bars2.shift();
+    ctx.clearRect(0,0,w,h);
+    const bw = w/bars2.length, mid=h/2;
+    ctx.fillStyle = st2==='inserted' ? 'var(--ok)' : (st2==='processing'?'#ffd60a':'#e8e8ea');
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue(
+      (st2==='inserted')?'--ok':(st2==='processing')?'--proc':'--rec').trim();
+    bars2.forEach((v,i)=>{
+      const amp = Math.max(1.5, v*(h*0.94));
+      ctx.fillRect(i*bw+0.5, mid-amp/2, bw-1.4, amp);
+    });
+    const el = document.getElementById('txt2');
+    if (live) { typed = Math.min(speakText().length, typed + 0.5);
+      el.textContent = '…' + speakText().slice(-Math.max(0,Math.min(24,Math.floor(typed)))); }
+    else if (st2==='processing') el.textContent = 'Transcribing…';
+    else if (st2==='inserted') el.textContent = '✓ Inserted';
+    else if (st2==='degraded') el.textContent = '! Raw text inserted';
+    else if (st2==='cancelled') el.textContent = '✕ Cancelled';
+    else if (st2==='error') el.textContent = '! Mic unavailable';
+    else el.textContent = 'Ready';
+    document.querySelector('#pill2 .dot').className = 'dot';
+    document.getElementById('pill2').classList.remove('idle','rec','partial','processing','inserted','degraded','cancelled','error');
+    document.getElementById('pill2').classList.add(st2==='partials'?'partial':st2);
+    // progress typing → rec→partials transition
+    if (st2==='recording' && typed >= speakText().length) setState(2,'partials');
+  }
+
+  /* --- 3: pulse ring --- */
+  {
+    const cv = document.getElementById('cv3'); const {ctx} = fit(cv);
+    const w = cv.clientWidth, h = cv.clientHeight, cx=w/2, cy=h/2;
+    const live = (st3==='recording'||st3==='partials');
+    const e = live ? smoothedEnv('c3', t) : 0.04;
+    ctx.clearRect(0,0,w,h);
+    // outer echo rings
+    for (let k=0;k<3;k++){
+      const ph = ((t*0.6 + k/3) % 1);
+      const r = 26 + ph*58 + e*22;
+      ctx.beginPath(); ctx.arc(cx,cy,r,0,7);
+      ctx.strokeStyle = `rgba(255,69,58,${live?(1-ph)*0.5:0.12})`;
+      ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    // core ring: radius tracks volume, 64-point wobble
+    const base = 22 + e*14;
+    ctx.beginPath();
+    for (let i=0;i<=64;i++){
+      const a = i/64*Math.PI*2;
+      const wob = live ? smoothedEnv('c3b'+i, t*1.7)*6 : 0;
+      const r = base + wob + 3*Math.sin(a*8 + t*4);
+      const x = cx+Math.cos(a)*r, y = cy+Math.sin(a)*r;
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = st3==='inserted' ? '#32d74b' : st3==='processing' ? '#ffd60a' : live ? '#ff453a' : '#8e8e93';
+    ctx.lineWidth = 2.4; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,69,58,.14)'; if (st3==='inserted') ctx.fillStyle='rgba(50,215,75,.14)'; ctx.fill();
+    const el = document.getElementById('pill3');
+    el.textContent = (st3==='partials'||st3==='recording') ? (typed<19? '…' : '') + speakText().slice(Math.max(0,speakText().length-18))
+      : st3==='processing' ? 'Transcribing…' : st3==='inserted' ? '✓ Inserted'
+      : st3==='degraded' ? '! Raw text inserted' : st3==='cancelled' ? '✕ Cancelled'
+      : st3==='error' ? '! Audio engine failed' : 'Hold ⌘⌥ to speak';
+    if (live) typed += 0.4;
+    if (st3==='recording' && e>0.05 && !el._fired){ setState(3,'partials'); el._fired=true; }
+    if (!live) el._fired=false;
+    el.classList.remove('idle','rec','partial','processing','inserted','degraded','cancelled','error');
+    el.classList.add(st3==='partials'?'partial':st3, 'pill');
+    el.style.background='var(--surface)'; el.style.border='1px solid var(--border)';
+  }
+
+  /* auto state cycle (unless a chip pinned it) */
+  [1,2,3].forEach(n=>{
+    const c = concept[n];
+    c._acc = (c._acc||0) + 1/60;
+    if (!c.auto) return;
+    const dwell = { idle:1.2, recording:2.2, partials:5.5, processing:2.4, inserted:2.2, degraded:2.6, cancelled:2.0, error:2.4 };
+    if (c._acc > (dwell[c.state]||2)) {
+      c._acc = 0;
+      const seq = ['recording','partials','processing','inserted','idle','recording','partials','processing','degraded','idle','recording','partials','cancelled','idle','recording','partials','processing','error','idle'];
+      const i = seq.indexOf(c.state);
+      setStateAuto(n, seq[(i+1)%seq.length]);
+      if (n===1||n===2) { if (seq[(i+1)%seq.length]==='partials'){ phraseIdx++; typed=0; } }
+    }
+  });
+  function setStateAuto(n,s){ concept[n].state=s; if(s==='partials') typed=0; renderChips(n);
+    const lab = document.getElementById('mb-active-label'); lab.textContent = 'A · ' + STATE_LABEL[s]; }
+
+  requestAnimationFrame(draw);
+}
+
+/* ---------- state chips ---------- */
+function renderChips(n) {
+  const box = document.querySelector(`.states[data-for="${n}"]`);
+  box.innerHTML = STATES.map(s =>
+    `<button class="chip ${s} ${concept[n].state===s?'on':''}" data-n="${n}" data-s="${s}">${STATE_LABEL[s]}</button>`
+  ).join('');
+}
+document.addEventListener('click', ev => {
+  const chip = ev.target.closest('.chip');
+  if (chip) { ev.stopPropagation(); setState(+chip.dataset.n, chip.dataset.s); return; }
+  const card = ev.target.closest('.card[data-hermes-send]');
+  if (card) {
+    const grid = card.closest('[data-grid]');
+    if (!grid) return;
+    grid.querySelectorAll('.card').forEach(c=>c.classList.remove('selected'));
+    card.classList.add('selected');
+    updateSel();
+  }
+  if (ev.target.closest('#btn-copy')) {
+    navigator.clipboard.writeText(promptStr()).then(()=>{ const c=document.getElementById('copied');
+      c.style.opacity=1; setTimeout(()=>c.style.opacity=0,1200); });
+  }
+  if (ev.target.closest('#btn-send')) {
+    // convention: hand the composed prompt to the Hermes send pipeline
+    const p = promptStr();
+    if (window.hermesSend) window.hermesSend(p);
+    else navigator.clipboard.writeText(p);
+  }
+});
+function promptStr() {
+  const icon = document.querySelector('#icon-grid .card.selected').dataset.key.slice(-1);
+  const wf = document.querySelector('.card[data-key^="wf"].selected');
+  return `pick icon ${icon} and waveform ${wf ? wf.dataset.key.slice(-1) : '2'}`;
+}
+function updateSel(){ document.getElementById('sel-code').textContent = promptStr(); }
+document.querySelector('.card[data-key="wf2"]').classList.add('selected');
+[1,2,3].forEach(n=>renderChips(n));
+updateSel();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
