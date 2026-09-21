@@ -30,6 +30,12 @@ enum AppInfo {
     /// which makes final assembly exact (see docs/decisions/ADR-001).
     static let chunkSeconds: Double = 1.5
 
+    /// Silence gate (t_b3e7802c "silent-input-must-not-lie"): chunks whose
+    /// RMS is below this floor never reach the decoder. ~-48 dBFS — well
+    /// under conversational speech (~-30..-20 dBFS), well over BlackHole
+    /// digital silence. Mirrored in sidecar stt.py as defense-in-depth.
+    static let silenceRmsFloor: Double = 0.004
+
     /// TTI budgets from brief §Speed (seconds) — polish wait is bounded by bucket.
     static let ttiBudgets: [(maxSeconds: Double, p50: Double)] = [
         (10, 1.5), (30, 2.5), (60, 5.0)

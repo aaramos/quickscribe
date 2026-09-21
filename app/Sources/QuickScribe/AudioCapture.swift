@@ -65,6 +65,12 @@ enum AudioPreflight {
 /// AVAudioEngine capture -> 16 kHz mono int16, flushed as WAV chunks
 /// every AppInfo.chunkSeconds to the onChunk callback (runbook topology:
 /// the APP owns capture + streaming; the sidecar owns models).
+///
+/// Silence gate (t_b3e7802c): each flush-chunk's RMS is computed before it
+/// leaves the app. Chunks below AppInfo.silenceRmsFloor are NOT emitted —
+/// silent audio never reaches Whisper, so the "Thank you." hallucination loop
+/// cannot be born. The session tracks voiced vs silent chunk counts so a
+/// fully-silent session reports honestly instead of inserting garbage.
 final class AudioCapture {
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
@@ -73,17 +79,34 @@ final class AudioCapture {
     private var pending = Data()           // not-yet-flushed int16 LE samples
     private var totalSamples: Int64 = 0
     private var flushSamples: Int64 = 0   // samples accumulated since last flush
+    private var flushEnergy: Double = 0   // sum of x² since last flush
     private(set) var isCapturing = false
 
+    /// Active capture device (resolved at start, shown in the overlay pill).
+    private(set) var activeDevice: InputDeviceResolver.Device?
+    /// Scoped default-input switch owned by the capture window (t_b3e7802c).
+    private var bind: InputDeviceResolver.Bind?
+    /// Chunk accounting for the honest "Couldn't hear you" path.
+    private(set) var voicedChunks = 0
+    private(set) var silentChunks = 0
+    private(set) var lastChunkRms: Double = 0
+
     /// Invoked on a background queue with a complete WAV file's bytes.
-    var onChunk: ((Data, Double) -> Void)?
+    /// `voiced` = chunk RMS at/above the silence floor (only voiced chunks
+    /// are ever emitted; the flag stays in the signature for the harness).
+    var onChunk: ((_ wav: Data, _ secs: Double, _ voiced: Bool) -> Void)?
 
     struct CaptureError: Error { let why: String }
 
     private let flushQueue = DispatchQueue(label: "quickscribe.flush")
 
+    var sessionWasFullySilent: Bool { silentChunks > 0 && voicedChunks == 0 }
+
     func start() throws {
         guard !isCapturing else { return }
+        voicedChunks = 0
+        silentChunks = 0
+        lastChunkRms = 0
         let inputFormat: AVAudioFormat
         do {
             inputFormat = try startEngine()
@@ -96,6 +119,7 @@ final class AudioCapture {
         pending.removeAll(keepingCapacity: true)
         totalSamples = 0
         flushSamples = 0
+        flushEnergy = 0
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buf, _ in
             self?.convert(buf)
         }
@@ -110,10 +134,21 @@ final class AudioCapture {
         if case .failure(let pf) = AudioPreflight.check() {
             throw CaptureError(why: pf.why)
         }
+        // Device bind (t_b3e7802c): never trust the OS default — on this
+        // host it is BlackHole 2ch (silent virtual loopback, proven RCA).
+        // Engine-level device APIs are absent from this OS's AVFAudio
+        // runtime; the proven mechanism is a scoped default-input switch
+        // across the capture window, restored on stop.
+        guard let dev = InputDeviceResolver.resolve() else {
+            throw CaptureError(why: "no microphone detected")
+        }
+        activeDevice = dev
+        bind = InputDeviceResolver.bindForCapture(dev)
         let inFmt = engine.inputNode.outputFormat(forBus: 0)
         guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else {
             throw CaptureError(why: "no live input device (rate=\(inFmt.sampleRate) ch=\(inFmt.channelCount))")
         }
+        NSLog("QuickScribe: capture device = '\(dev.name)' (id=\(dev.id), ch=\(dev.channels), virtual=\(dev.isVirtual))")
         if let exc = ExceptionGuard.run({ [engine] in
             engine.prepare()
             try engine.start()
@@ -128,11 +163,13 @@ final class AudioCapture {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isCapturing = false
+        if let b = bind { InputDeviceResolver.restore(b); bind = nil }
         return Double(totalSamples) / 16000.0
     }
 
     /// Flush any buffered audio (< chunk boundary) as the final "tail" WAV.
     /// Called on hotkey release before stop so the tail goes out immediately.
+    /// Still RMS-gated — a silent tail is never emitted (t_b3e7802c).
     func flushTail() {
         guard flushSamples > 0 else { return }
         emitChunk()
@@ -151,10 +188,16 @@ final class AudioCapture {
         }
         guard status != .error, out.frameLength > 0, let ch = out.int16ChannelData else { return }
         let bytes = Data(bytes: ch[0], count: Int(out.frameLength) * 2)
+        // Sum of squares over this buffer's int16 samples (in normalized
+        // units) — accumulated per chunk so chunk RMS is exact, not sampled.
+        let samples = UnsafeBufferPointer(start: ch[0], count: Int(out.frameLength))
+        var energy: Double = 0
+        for s in samples { let v = Double(s) / 32768.0; energy += v * v }
         flushQueue.sync {
             pending.append(bytes)
             totalSamples += Int64(out.frameLength)
             flushSamples += Int64(out.frameLength)
+            flushEnergy += energy
             if flushSamples >= Int64(16000 * AppInfo.chunkSeconds) {
                 emitChunkLocked()
             }
@@ -167,14 +210,27 @@ final class AudioCapture {
 
     /// Caller holds flushQueue. Non-overlapping chunks: whatever is buffered
     /// goes out and the buffer resets — partials concatenate verbatim.
+    /// SILENCE GATE: chunks whose RMS is below the floor are counted and
+    /// dropped; they are never sent to the decoder.
     private func emitChunkLocked() {
         guard flushSamples > 0 else { return }
-        let wav = WavWriter.wav(int16LE: pending, sampleRate: 16000)
+        let rms = (flushEnergy / Double(flushSamples)).squareRoot()
         let secs = Double(flushSamples) / 16000.0
-        pending.removeAll(keepingCapacity: true)
         flushSamples = 0
-        onChunk?(wav, secs)
+        flushEnergy = 0
+        lastChunkRms = rms
+        if rms < AppInfo.silenceRmsFloor {
+            silentChunks += 1
+            NSLog(String(format: "QuickScribe: chunk %.1fs rms=%.5f BELOW floor %.4f — gated (no decode)",
+                         secs, rms, AppInfo.silenceRmsFloor))
+            return
+        }
+        voicedChunks += 1
+        let wav = WavWriter.wav(int16LE: pending, sampleRate: 16000)
+        pending.removeAll(keepingCapacity: true)
+        onChunk?(wav, secs, true)
     }
+
 }
 
 enum WavWriter {

@@ -13,6 +13,18 @@ log = logging.getLogger("quickscribe.stt")
 
 TARGET_SR = 16000
 
+# Silence floor (t_b3e7802c defense-in-depth): chunks below this RMS never
+# touch the model. Mirrors AppInfo.silenceRmsFloor on the app side (~-48
+# dBFS). A silent WAV must return "" WITHOUT a decode — Whisper's canonical
+# failure on silence is the "Thank you." hallucination loop.
+SILENCE_RMS_FLOOR = 0.004
+
+
+def rms(samples: np.ndarray) -> float:
+    if samples.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
+
 
 def _decode_wav(data: bytes) -> np.ndarray:
     """Decode 16k-mono-int16 WAV bytes to float32 in [-1, 1]."""
@@ -75,6 +87,13 @@ class STTEngine:
         """Transcribe 16k mono int16 WAV bytes. partial=True marks in-flight chunks."""
         samples = _decode_wav(wav_bytes)
         if len(samples) < TARGET_SR * 0.1:
+            return ""
+        # RMS gate BEFORE decode (t_b3e7802c): silent audio never reaches
+        # Whisper — no decode of silence, no silence hallucination.
+        level = rms(samples)
+        if level < SILENCE_RMS_FLOOR:
+            log.info("transcribe gated: rms=%.5f < floor %.4f, %.1fs — no decode",
+                     level, SILENCE_RMS_FLOOR, len(samples) / TARGET_SR)
             return ""
         result = mlx_whisper.transcribe(
             samples,

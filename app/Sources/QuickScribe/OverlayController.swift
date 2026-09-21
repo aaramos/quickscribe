@@ -7,8 +7,8 @@ import AppKit
 final class OverlayController {
     enum State: Equatable {
         case hidden
-        case recording
-        case partial(String)
+        case recording(device: String?)
+        case partial(String, device: String?)
         case processing
         case inserted
         case degraded        // polish unavailable — raw inserted (brief §8)
@@ -18,13 +18,20 @@ final class OverlayController {
         var label: String {
             switch self {
             case .hidden: return ""
-            case .recording: return "● Recording  (Esc to cancel)"
-            case .partial(let t): return "● " + t
+            case .recording(let d): return "● Recording \(d.map { "· \($0)" } ?? "")  (Esc to cancel)"
+            case .partial(let t, let d): return "● \(t)\(d.map { "  · \($0)" } ?? "")"
             case .processing: return "○ Transcribing…"
             case .inserted: return "✓ Inserted"
             case .degraded: return "! LLM down — inserted raw text"
             case .cancelled: return "✕ Cancelled"
             case .error(let m): return "! " + m
+            }
+        }
+
+        var showsDot: Bool {
+            switch self {
+            case .hidden: return false
+            default: return true
             }
         }
     }

@@ -33,6 +33,9 @@ final class SessionController {
     private var sttMs = 0
     private var insertOnce = false              // guarantees insert happens exactly once
     private var generation = 0                  // invalidates in-flight work after cancel
+    private var lastPartialRaw = ""            // repeat suppression: identical decoded partial >=2x = hallucination (t_b3e7802c)
+    private var repeatSuppressed = false
+    private var lastInsertedText = ""         // back-to-back identical insert suppression
 
     /// Menu bar needs to know when sessions start/end (icon state, menu disable).
     var onPhaseChange: ((Bool) -> Void)?
@@ -44,8 +47,17 @@ final class SessionController {
         overlay.onEscape = { [weak self] in
             Task { @MainActor in self?.cancel() }
         }
-        capture.onChunk = { [weak self] wav, secs in
+        capture.onChunk = { [weak self] wav, secs, _ in
             DispatchQueue.main.async { self?.streamChunk(wav: wav, secs: secs) }
+        }
+        // Device hot-plug / default-change: re-resolve and log so the next
+        // capture start binds the right mic (t_b3e7802c).
+        InputDeviceResolver.registerChangeCallback {
+            if let d = InputDeviceResolver.resolve() {
+                NSLog("QuickScribe: input devices changed — next capture will use '\(d.name)'")
+            } else {
+                NSLog("QuickScribe: input devices changed — NO real input device available")
+            }
         }
     }
 
@@ -96,16 +108,26 @@ final class SessionController {
         chunkFails = 0
         insertOnce = false
         sttMs = 0
+        lastPartialRaw = ""
+        repeatSuppressed = false
         sessionStart = Date()
 
         do {
             try capture.start()
+        } catch let e as AudioCapture.CaptureError {
+            // Honest failure surface: no real mic vs permission/engine problem.
+            let msg = e.why.contains("no microphone")
+                ? "No microphone detected"
+                : "Mic unavailable — check Microphone permission"
+            overlay.show(.error(msg), autoHideAfter: 2.5)
+            NSLog("QuickScribe: capture start failed: \(e.why)")
+            return
         } catch {
             overlay.show(.error("Mic unavailable — check Microphone permission"), autoHideAfter: 2.5)
             return
         }
         mode = .pushToTalk
-        overlay.show(.recording)   // same runloop tick as hotkey → <100ms (brief)
+        overlay.show(.recording(device: capture.activeDevice?.name))   // same runloop tick as hotkey → <100ms (brief)
         onPhaseChange?(true)
     }
 
@@ -154,9 +176,23 @@ final class SessionController {
                 guard let self = self, self.generation == gen else { return }
                 self.sttMs += ms
                 self.partialInFlight = false
-                if let text = text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    self.partialText = self.join(self.partialText, text)
-                    if self.mode != .idle { self.overlay.show(.partial(self.partialText)) }
+                let trimmed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    // Repeat suppression (t_b3e7802c): Whisper on silent/near-
+                    // silent audio emits the SAME polite phrase every chunk.
+                    // An identical decoded partial twice in a row is a
+                    // hallucination — drop it and every further repeat.
+                    if trimmed.caseInsensitiveCompare(self.lastPartialRaw) == .orderedSame {
+                        self.repeatSuppressed = true
+                        NSLog("QuickScribe: repeat partial '\(trimmed)' suppressed (hallucination guard)")
+                    } else {
+                        self.lastPartialRaw = trimmed
+                        self.repeatSuppressed = false
+                        self.partialText = self.join(self.partialText, trimmed)
+                        if self.mode != .idle {
+                            self.overlay.show(.partial(self.partialText, device: self.capture.activeDevice?.name))
+                        }
+                    }
                 } else if text == nil {
                     // Only a failed REQUEST counts as a chunk failure; an empty
                     // success (silence tail) is normal — t_955de3e6.
@@ -196,7 +232,17 @@ final class SessionController {
             // We no longer hold full audio (streamed incrementally). If a chunk
             // failed AND no partial arrived, insert nothing (brief §7: empty → nothing).
             if raw.isEmpty {
-                overlay.show(.error("Nothing captured"), autoHideAfter: 1.5)
+                // Honest silence path (t_b3e7802c): if EVERY chunk that left the
+                // app was below the RMS floor (or nothing was emitted at all),
+                // the mic heard nothing — say so, name the device, insert nothing.
+                if capture.sessionWasFullySilent || capture.silentChunks + capture.voicedChunks == 0 {
+                    let dev = capture.activeDevice.map { " (device: \($0.name))" } ?? ""
+                    overlay.show(.error("Couldn't hear you — check your mic\(dev)"), autoHideAfter: 3.0)
+                } else if repeatSuppressed && partialText.isEmpty {
+                    overlay.show(.error("Couldn't hear you — check your mic"), autoHideAfter: 3.0)
+                } else {
+                    overlay.show(.error("Nothing captured"), autoHideAfter: 1.5)
+                }
                 return
             }
             // Partial data exists despite a failed chunk — proceed with what we have,
@@ -245,13 +291,23 @@ final class SessionController {
     private func insertText(_ text: String, raw: String, profile prof: String,
                             degraded: Bool, polishStarted: Date) {
         guard !insertOnce else { return }   // exactly-once guarantee
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            overlay.show(.error("Nothing to insert"), autoHideAfter: 1.5)
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            overlay.show(.error("Couldn't hear you — check your mic"), autoHideAfter: 2.5)
+            return
+        }
+        // Back-to-back identical insert suppression (t_b3e7802c): the same
+        // text twice in a row means the same hallucination survived the
+        // partial gate — refuse the second insert, never the first.
+        if trimmedText.caseInsensitiveCompare(lastInsertedText) == .orderedSame {
+            overlay.show(.error("Duplicate text suppressed"), autoHideAfter: 2.0)
+            NSLog("QuickScribe: identical repeat insert suppressed: '\(trimmedText)'")
             return
         }
         Insertion.insert(text) { [weak self] ok, lostImages in
             guard let self = self else { return }
             self.insertOnce = true
+            if ok { self.lastInsertedText = trimmedText }
             let msPolish = Int(Date().timeIntervalSince(polishStarted) * 1000)
             let msSTT = self.sttMs
             if ok {

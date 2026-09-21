@@ -9,7 +9,7 @@ import Foundation
 let capture = AudioCapture()
 var chunks: [Data] = []
 let group = DispatchGroup()
-capture.onChunk = { wav, secs in
+capture.onChunk = { wav, secs, _ in
     print("chunk wav=\(wav.count)B secs=\(String(format: "%.2f", secs))")
     chunks.append(wav)
 }
