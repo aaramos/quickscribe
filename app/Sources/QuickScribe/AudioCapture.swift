@@ -132,8 +132,17 @@ final class AudioCapture {
         totalSamples = 0
         flushSamples = 0
         flushEnergy = 0
-        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buf, _ in
-            self?.convert(buf)
+        // installTap throws NSException on format mismatch — must be inside
+        // the exception bridge (t_50da3b54) or AppKit swallows it as a
+        // silent no-op.
+        if let exc = ExceptionGuard.run({ [engine, inputFormat] in
+            engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buf, _ in
+                self?.convert(buf)
+            }
+        }) {
+            engine.stop()
+            if let b = bind { InputDeviceResolver.restore(b); bind = nil }
+            throw CaptureError(why: "tap install: \(exc)")
         }
         isCapturing = true
     }
@@ -167,7 +176,19 @@ final class AudioCapture {
         }) {
             throw CaptureError(why: "engine init: \(exc)")
         }
-        return inFmt
+        // macOS 27 trap (t_50da3b54): the pre-start inputNode.outputFormat
+        // can report a nominal rate (16k) that the hardware does NOT come up
+        // at (C920 starts at 48k/2ch). Installing the tap with the stale
+        // pre-start format throws com.apple.coreaudio.avfaudio from
+        // InstallTapOnNode — inside start(), OUTSIDE the ExceptionGuard —
+        // which AppKit swallows: menu click and hotkey both become silent
+        // no-ops. Re-read the LIVE format after start and install the tap
+        // with THAT. Do not revert to using the pre-start format for the tap.
+        let liveFmt = engine.inputNode.outputFormat(forBus: 0)
+        guard liveFmt.sampleRate > 0, liveFmt.channelCount > 0 else {
+            throw CaptureError(why: "live input format invalid (rate=\(liveFmt.sampleRate) ch=\(liveFmt.channelCount))")
+        }
+        return liveFmt
     }
 
     func stop() -> Double {
