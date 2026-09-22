@@ -7,9 +7,13 @@ import AVFoundation
 import Foundation
 
 let capture = AudioCapture()
+// NOTE: the tap fires on the audio render queue. `DispatchQueue.main.sync`
+// from a tool without a main runloop deadlocks (main sleeps, the block never
+// runs) — that was the 90s hang at 23:07. Use an NSLock instead.
 var levels: [Double] = []
+let levelsLock = NSLock()
 capture.onLevel = { lvl in
-    DispatchQueue.main.sync { levels.append(lvl) }
+    levelsLock.lock(); levels.append(lvl); levelsLock.unlock()
 }
 do {
     try capture.start()

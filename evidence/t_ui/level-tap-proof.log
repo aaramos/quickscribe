@@ -1,0 +1,7 @@
+2026-09-21 23:12:59.927 level-tap-proof[91483:3031748] QuickScribe: capture device = 'BlackHole 2ch' (id=75, ch=2, virtual=true)
+2026-09-21 23:13:01.535 level-tap-proof[91483:3031853] QuickScribe: chunk 1.6s rms=0.00034 BELOW floor 0.0040 — gated (no decode)
+capture live: true
+level samples=31 min=0.0000 max=0.8331 mean=0.0672 var=0.037673 nonzero=16 peak_tap=0.8331
+capture stopped secs=3.09
+PASS: level tap non-flat — 16 non-zero of 31, spread 0.8331
+EXIT=0
