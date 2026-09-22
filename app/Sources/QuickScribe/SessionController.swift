@@ -50,6 +50,11 @@ final class SessionController {
         capture.onChunk = { [weak self] wav, secs, _ in
             DispatchQueue.main.async { self?.streamChunk(wav: wav, secs: secs) }
         }
+        // LEVEL TAP → WF1 ticker (t_3db202e7). Read-only; chunk pipeline
+        // untouched.
+        capture.onLevel = { [weak self] lvl in
+            self?.overlay.pushLevel(lvl)
+        }
         // Device hot-plug / default-change: re-resolve and log so the next
         // capture start binds the right mic (t_b3e7802c).
         InputDeviceResolver.registerChangeCallback {
@@ -127,6 +132,7 @@ final class SessionController {
             return
         }
         mode = .pushToTalk
+        overlay.resetWave()
         overlay.show(.recording(device: capture.activeDevice?.name))   // same runloop tick as hotkey → <100ms (brief)
         onPhaseChange?(true)
     }

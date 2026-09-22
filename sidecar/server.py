@@ -75,13 +75,35 @@ class CaptureBody(BaseModel):
     ms_polish: int
 
 
+class ModelBody(BaseModel):
+    model: str
+
+
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
         "stt_ready": stt_engine.ready,
         "llm_ready": await polisher.probe(),
+        "model": polisher.model,
     }
+
+
+@app.get("/models")
+async def list_models():
+    """Live oMLX model list for the menu-bar picker."""
+    return JSONResponse({"models": await polisher.list_models(), "current": polisher.model})
+
+
+@app.post("/models")
+async def switch_model(body: ModelBody):
+    """Hot-swap the polish model — no restart. On failure the previous
+    model stays active and ok=false is returned."""
+    name = body.model.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="model must be non-empty")
+    ok, active = await polisher.set_model(name)
+    return JSONResponse({"ok": ok, "model": active})
 
 
 @app.post("/transcribe")

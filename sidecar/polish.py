@@ -114,6 +114,41 @@ class Polisher:
             self._llm_ready = False
             return False
 
+    # ---- model hot-swap ---------------------------------------------------------
+
+    async def list_models(self) -> list[str]:
+        """Live model ids from oMLX /models (cheap, no model wake)."""
+        try:
+            client = self._get_client()
+            r = await client.get(f"{self.base_url}/models")
+            r.raise_for_status()
+            return [m["id"] for m in r.json().get("data", []) if m.get("id")]
+        except Exception as exc:
+            log.warning("list_models failed: %s", exc)
+            return []
+
+    async def set_model(self, model: str) -> tuple[bool, str]:
+        """Hot-swap the polish model (no restart). Verifies the new model
+        answers a warm ping; on failure the previous model stays active.
+        Returns (ok, active_model)."""
+        old = self.model
+        if model == old:
+            return True, old
+        self.model = model
+        try:
+            ok = await self._warm_ping()
+        except asyncio.CancelledError:
+            self.model = old
+            raise
+        if not ok:
+            self.model = old
+            await self._warm_ping()  # re-confirm fallback is resident
+            log.warning("model switch to %s failed; staying on %s", model, old)
+            return False, old
+        self._last_ka_ok = time.monotonic()  # keepalive now keeps NEW model warm
+        log.info("polish model hot-swapped %s -> %s", old, model)
+        return True, model
+
     async def probe(self, ttl: float = 5.0) -> bool:
         """Cheap readiness probe, cached for ttl seconds."""
         now = time.monotonic()

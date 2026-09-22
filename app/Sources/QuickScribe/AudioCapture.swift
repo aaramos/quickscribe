@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import QuartzCore
 import SpecCatch
 
 /// ObjC exception bridge: AVAudioEngine.prepare()/start() raise
@@ -96,6 +97,15 @@ final class AudioCapture {
     /// are ever emitted; the flag stays in the signature for the harness).
     var onChunk: ((_ wav: Data, _ secs: Double, _ voiced: Bool) -> Void)?
 
+    /// LEVEL TAP (t_3db202e7): invoked on a background queue with the live
+    /// input level 0...1 for every capture buffer, ~1 frame per 16 ms so a
+    /// 60 fps waveform has real data behind it. Pure read-only tap — it
+    /// does not touch the chunk pipeline. UI-only consumer (WF1 overlay).
+    var onLevel: ((_ level: Double) -> Void)?
+    private var lastLevelEmit = CFTimeInterval(0)
+    /// Peak raw level since capture started (headless level-tap proof).
+    private(set) var peakLevel: Double = 0
+
     struct CaptureError: Error { let why: String }
 
     private let flushQueue = DispatchQueue(label: "quickscribe.flush")
@@ -107,6 +117,8 @@ final class AudioCapture {
         voicedChunks = 0
         silentChunks = 0
         lastChunkRms = 0
+        peakLevel = 0
+        lastLevelEmit = 0
         let inputFormat: AVAudioFormat
         do {
             inputFormat = try startEngine()
@@ -193,6 +205,16 @@ final class AudioCapture {
         let samples = UnsafeBufferPointer(start: ch[0], count: Int(out.frameLength))
         var energy: Double = 0
         for s in samples { let v = Double(s) / 32768.0; energy += v * v }
+        // LEVEL TAP: per-buffer RMS → 0...1 level, throttled to ~60 fps.
+        if let onLevel = onLevel, out.frameLength > 0 {
+            let lvl = min(1.0, (energy / Double(out.frameLength)).squareRoot() * 6.0)
+            if lvl > peakLevel { peakLevel = lvl }
+            let now = CACurrentMediaTime()
+            if now - lastLevelEmit >= 0.015 {
+                lastLevelEmit = now
+                onLevel(lvl)
+            }
+        }
         flushQueue.sync {
             pending.append(bytes)
             totalSamples += Int64(out.frameLength)

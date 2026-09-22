@@ -1,0 +1,42 @@
+{
+  "S1": {
+    "label": "fillers + meeting",
+    "text": "Um so yeah, we should, you know, move the meeting to, uh, Thursday because Sarah's flight lands at, like, nine thirty and she probably can't, um, join before ten."
+  },
+  "S2": {
+    "label": "proper nouns",
+    "text": "I left a message for Dr. Chen at St. Mary's Hospital on Beacon Hill in Boston, he said call back after three o'clock Pacific time, that's his time not mine."
+  },
+  "S3": {
+    "label": "numbered list",
+    "text": "Okay notes, one, buy milk and eggs at Whole Foods. Two, email the invoice to Mike before five. Three, uh, cancel the gym membership, they charged me again. Four, call Mom back, she's upset."
+  },
+  "S4": {
+    "label": "run-on paragraph",
+    "text": "so the thing is the vendor kept pushing the date back and back and back and now we're three weeks late and the client is, like, visibly annoyed on every call and I think if we don't get them a firm date by Friday they're gonna walk and honestly it's kind of on us because we never sent the updated timeline even though I asked the team twice maybe three times."
+  },
+  "S5": {
+    "label": "code-ish terms",
+    "text": "So the bug is, um, in the async handler, it throws a null pointer when the JSON payload is empty, we should add a guard clause and maybe, you know, write a unit test in pytest for that edge case."
+  },
+  "S6": {
+    "label": "EN + number mix",
+    "text": "Send me the numbers: revenue was 4.2 million last quarter, up 17 percent, and headcount is now 87, we're hiring 12 more engineers by December 15th."
+  },
+  "S7": {
+    "label": "Chinese + English mix",
+    "text": "那个，帮我把周五的 meeting 改到下周一 下午三点吧，客户那边 from Shanghai 这周休假，对了，deck 记得今晚之前发我，thanks。"
+  },
+  "S8": {
+    "label": "messy voicemail",
+    "text": "Hey it's, um, it's Gary, I'm, uh, driving so this might be, yeah, anyway, can you, did you ever, so the thing about the invoice, the number's on the counter I think, anyway call me back on my cell, 5 1 0, 5 5 5, oh no, 5 1 2, wait, 867 5309, yeah that one, bye."
+  },
+  "S9": {
+    "label": "tech ops dictation",
+    "text": "Quick note for the ticket: the deploy failed because the oMLX server ran out of context on the fourth retry, and the fallback model wasn't pinned, so we got a fifty-two nine. Restart the sidecar first, then retry with max tokens set to two thousand forty eight."
+  },
+  "S10": {
+    "label": "casual personal",
+    "text": "Babe, I'm grabbing dinner on my way home, do you want the Thai place or, you know, the burger spot near the park? Pick up aspirin too, I think we're out, and maybe ice cream, the pistachio one you like."
+  }
+}

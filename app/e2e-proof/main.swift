@@ -129,6 +129,16 @@ func ensureTargetFocused(seed: String) -> Bool {
     return false
 }
 
+/// Wipe the TextEdit document to a unique seed so token polling cannot be
+/// satisfied by stale text from an earlier run (t_92953726: S4/S5 stale-token
+/// false positive — cleared doc means "token present" == "inserted THIS run").
+func clearDoc(seed: String) -> Bool {
+    _ = Process.runCmd2("/usr/bin/osascript", ["-e",
+        "tell application \"System Events\" to tell process \"TextEdit\" to set value of text area 1 of scroll area 1 of front window to \"\(seed)\""])
+    spin(0.3)
+    return axFocusedValue().contains(seed)
+}
+
 /// Clipboard mechanics proof using the REAL Insertion code (same module):
 /// snapshot -> write -> recognize marker -> restore -> verify byte-identical.
 @MainActor
@@ -288,6 +298,10 @@ MainActor.assumeIsolated {
         jlog("== \(name): begin (rewrite=\(rewrite), toggled=\(toggled))")
         pbSetMarker()
         let pbBefore = pbString()
+        // Fresh-seed the doc: token present afterwards can only mean THIS run inserted.
+        let seed = "QS929-SEED-\(Int(Date().timeIntervalSince1970))"
+        let cleared = clearDoc(seed: seed)
+        jlog("\(name): doc cleared to seed ok=\(cleared)")
 
         if toggled {
             session.toggleHandsFree()
@@ -374,20 +388,30 @@ MainActor.assumeIsolated {
     if ProcessInfo.processInfo.environment["QS955_DEGRADE"] == "1" || screenLocked {
         // S4 — sidecar DOWN mid-flight: capture, kill sidecar before release,
         // expect NO insert and NO crash.
-        jlog("== S4-degrade: killing sidecar pid \(pidOfSidecar()) before release")
+        jlog("== S4-degrade: pinning sidecar down BEFORE recording")
         pbSetMarker()
         let pbBefore4 = pbString()
+        let seed4 = "QS929-SEED-S4-\(Int(Date().timeIntervalSince1970))"
+        jlog("S4: doc cleared to seed ok=\(clearDoc(seed: seed4))")
+        // KeepAlive revives uvicorn ~2 s after a single kill, so chunks mid
+        // utterance would succeed and the spec'd degraded path would insert
+        // raw text. Pin the port down from before-record through release+2s:
+        // every chunk fails, raw stays empty, nothing must be inserted.
+        func killSidecar() {
+            let p = pidOfSidecar()
+            if p > 0 { _ = Process.runCmd("/bin/kill", ["-9", "\(p)"]) }
+        }
+        killSidecar()
         post(kControl, down: true, .maskControl); spin(0.03)
         post(kCommand, down: true, cc)
         spin(0.45)
         guard session.isRecording else { jlog("FAIL(S4): not recording"); return }
         Speaker.play("/tmp/qs955-utt.wav", seconds: 4.2)
-        let pid = pidOfSidecar()
-        if pid > 0 { _ = Process.runCmd("/bin/kill", ["-9", "\(pid)"]) }
-        spin(0.3)
+        let downUntil = Date().addingTimeInterval(2.3)
+        repeat { killSidecar(); spin(0.3) } while Date() < downUntil
         post(kCommand, down: false, .maskControl); spin(0.02)
         post(kControl, down: false, [])
-        jlog("S4: released with sidecar down")
+        jlog("S4: released with sidecar pinned down")
         let d4 = Date().addingTimeInterval(16)
         while Date() < d4, session.isRecording || session.overlayStateLabel().contains("processing") { spin(0.3) }
         spin(2.0)

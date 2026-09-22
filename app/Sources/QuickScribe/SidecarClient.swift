@@ -13,10 +13,12 @@ final class SidecarClient {
         return URLSession(configuration: cfg)
     }()
 
-    struct Health: Decodable { let status: String; let stt_ready: Bool; let llm_ready: Bool }
+    struct Health: Decodable { let status: String; let stt_ready: Bool; let llm_ready: Bool; var model: String? }
     struct Transcript: Decodable { let text: String; let language: String; var ms: Int? }
     struct Polished: Decodable { let text: String; let degraded: Bool }
     struct CaptureEntry: Decodable { let raw: String; let polished: String; let profile: String; let ts: Double }
+    struct ModelList: Decodable { let models: [String]; let current: String }
+    struct ModelSwitch: Decodable { let ok: Bool; let model: String }
 
     func health(timeout: TimeInterval = 2, completion: @escaping (Health?) -> Void) {
         get("/health", timeout: timeout) { (data: Data?) in
@@ -83,6 +85,32 @@ final class SidecarClient {
             "ms_stt": msStt, "ms_polish": msPolish,
         ])
         session.dataTask(with: req) { _, _, _ in }.resume()
+    }
+
+    /// GET /models — live oMLX model list for the menu-bar picker.
+    func listModels(timeout: TimeInterval = 4, completion: @escaping (ModelList?) -> Void) {
+        get("/models", timeout: timeout) { (data: Data?) in
+            guard let data = data else { completion(nil); return }
+            completion(try? JSONDecoder().decode(ModelList.self, from: data))
+        }
+    }
+
+    /// POST /models — hot-swap the polish model (no sidecar restart).
+    /// Completion: (ok, activeModel). On failure the previous model stays active.
+    func switchModel(_ model: String, timeout: TimeInterval = 130,
+                     completion: @escaping (Bool, String?) -> Void) {
+        guard let url = URL(string: "\(AppInfo.sidecarBase)/models") else { completion(false, nil); return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["model": model])
+        session.dataTask(with: req) { data, _, _ in
+            guard let data = data, let s = try? JSONDecoder().decode(ModelSwitch.self, from: data) else {
+                completion(false, nil); return
+            }
+            completion(s.ok, s.model)
+        }.resume()
     }
 
     /// GET /history?limit=50.
