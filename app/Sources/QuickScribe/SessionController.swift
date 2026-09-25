@@ -55,13 +55,20 @@ final class SessionController {
         capture.onLevel = { [weak self] lvl in
             self?.overlay.pushLevel(lvl)
         }
-        // Device hot-plug / default-change: re-resolve and log so the next
-        // capture start binds the right mic (t_b3e7802c).
-        InputDeviceResolver.registerChangeCallback {
-            if let d = InputDeviceResolver.resolve() {
-                NSLog("QuickScribe: input devices changed — next capture will use '\(d.name)'")
-            } else {
-                NSLog("QuickScribe: input devices changed — NO real input device available")
+        // Device hot-plug / default-change (t_eec52a7e): re-resolve AND drop
+        // the engine instance the OS pinned to the old device — re-resolving
+        // alone is pointless while a stale engine survives (that was the
+        // "new mic ignored until relaunch" defect). Idle-only: mid-capture
+        // the bind/restore pair keeps the running session stable.
+        InputDeviceResolver.registerChangeCallback { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                if let d = InputDeviceResolver.resolve() {
+                    NSLog("QuickScribe: input devices changed — next capture will use '\(d.name)'")
+                } else {
+                    NSLog("QuickScribe: input devices changed — NO real input device available")
+                }
+                self.capture.invalidateEngine()
             }
         }
     }

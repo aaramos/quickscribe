@@ -45,6 +45,45 @@ non-zero peakLevel + chunks=0 with "gated" lines in a silent room
 - t_220b8507: inputNode pre-touch + ExceptionGuard for prepare()/start().
 - t_b3e7802c: BlackHole default-input trap → InputDeviceResolver bind + silence gate.
 
+## Device hot-plug proof (t_eec52a7e)
+
+Defect: a (re)connected mic was ignored until app restart. RCA: the
+CoreAudio listener existed and re-resolved, but AVAudioEngine pins its
+input device at first touch for the lifetime of the ENGINE OBJECT —
+AudioCapture held one engine as a `let`, so re-resolution changed nothing
+(proof: reused engine keeps old device's tap format after the default
+switches; a fresh engine reports the new one — macOS 27, both mics).
+Fix: the listener now also calls `invalidateEngine()` (idle-only), so the
+next press builds a fresh engine bound to the current resolver choice.
+
+Proof harness: app/build/proofs/hotplug-proof
+build:
+  clang -c -O -I Sources/SpecCatch/include Sources/SpecCatch/SpecCatch.m -o build/proofs/SpecCatch-hotplug.o
+  swiftc -O -o build/proofs/hotplug-proof \
+    -I Sources/SpecCatch/include \
+    -Xcc -fmodule-map-file=$PWD/Sources/SpecCatch/include/module.modulemap \
+    Sources/QuickScribe/AudioCapture.swift Sources/QuickScribe/InputDeviceResolver.swift \
+    Sources/QuickScribe/AppInfo.swift proof-src/hotplug/main.swift build/proofs/SpecCatch-hotplug.o \
+    -framework AVFoundation -framework AppKit
+  codesign --force -s "Pure Voice Local Development" build/proofs/hotplug-proof
+PASS criteria: "ALL PASS (10 checks)" + exit 0. Six unit checks drive the
+pure selection core with fake device lists (phantom/BlackHole gate,
+unplug→fallback, unplug→nil no-mic, pin precedence). Four live checks run
+real capture sessions on one AudioCapture object: after a default-input
+switch (fires the same CoreAudio notifications as a physical (re)connect;
+a physical plug additionally fires the kAudioHardwarePropertyDevices
+listener — identical code path, cannot be scripted unattended, proven via
+default-switch + live unified-log engine-regen fingerprint), the NEXT press
+must bind the new device at ENGINE level (live tap format), no relaunch.
+RED control: same harness minus invalidateEngine against pre-fix sources
+reproduces the stale-engine capture (evidence/t_eec52a7e/).
+
+Suite baseline note: e2e-proof requires the BlackHole driver to route TTS
+into the default input; it is no longer installed on this host (removed
+with the owner's audio rig), so it exits FATAL at startup — pre-existing
+environment gap, not a regression. tapstart-proof + level-tap-proof +
+hotplug-proof are the runnable green set.
+
 ## Owner hand test (final acceptance)
 Hold Control+Command in any focused app → overlay pill appears within
 ~100 ms → speak → release → text inserts exactly once.

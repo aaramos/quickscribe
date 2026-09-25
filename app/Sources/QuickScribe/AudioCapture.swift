@@ -73,7 +73,14 @@ enum AudioPreflight {
 /// cannot be born. The session tracks voiced vs silent chunk counts so a
 /// fully-silent session reports honestly instead of inserting garbage.
 final class AudioCapture {
-    private let engine = AVAudioEngine()
+    /// NOT a `let`: AVAudioEngine binds its input device the first time the
+    /// node graph is touched and never re-reads the system default (proven
+    /// on macOS 27, t_eec52a7e: an engine first touched while default=A keeps
+    /// reporting A's format after the default switches to B; only a FRESH
+    /// engine reports B). A long-lived engine is therefore exactly the
+    /// "new mic ignored until app restart" defect — `invalidateEngine()`
+    /// swaps in a fresh instance on device changes while idle.
+    private var engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
                                               sampleRate: 16000, channels: 1, interleaved: true)!
@@ -85,6 +92,10 @@ final class AudioCapture {
 
     /// Active capture device (resolved at start, shown in the overlay pill).
     private(set) var activeDevice: InputDeviceResolver.Device?
+    /// LIVE tap format from the engine that actually captured (t_eec52a7e
+    /// proof hook): shows the device the ENGINE bound, not what the resolver
+    /// asked for. nil when no capture has run since the last invalidate.
+    private(set) var liveTapFormat: AVAudioFormat?
     /// Scoped default-input switch owned by the capture window (t_b3e7802c).
     private var bind: InputDeviceResolver.Bind?
     /// Chunk accounting for the honest "Couldn't hear you" path.
@@ -188,7 +199,21 @@ final class AudioCapture {
         guard liveFmt.sampleRate > 0, liveFmt.channelCount > 0 else {
             throw CaptureError(why: "live input format invalid (rate=\(liveFmt.sampleRate) ch=\(liveFmt.channelCount))")
         }
+        liveTapFormat = liveFmt
         return liveFmt
+    }
+
+    /// Drop the pinned engine so the NEXT start() binds the current default
+    /// input (t_eec52a7e). Only valid while idle — mid-capture the engine is
+    /// deliberately left alone (a mid-session hot-swap of OUTPUTS must not
+    /// disturb recording; the bind/restore pair keeps the input stable for
+    /// the whole capture window).
+    func invalidateEngine() {
+        guard !isCapturing else { return }
+        engine = AVAudioEngine()
+        converter = nil
+        activeDevice = nil
+        liveTapFormat = nil
     }
 
     func stop() -> Double {

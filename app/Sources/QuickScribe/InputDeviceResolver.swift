@@ -86,17 +86,24 @@ enum InputDeviceResolver {
 
     /// Resolve the device the engine should bind. See header for precedence.
     static func resolve() -> Device? {
-        let all = allInputDevices()
-        if let pin = ProcessInfo.processInfo.environment["QUICKSCRIBE_INPUT_PIN"], !pin.isEmpty {
+        resolve(devices: allInputDevices(),
+                defaultID: defaultInputDevice(),
+                pin: ProcessInfo.processInfo.environment["QUICKSCRIBE_INPUT_PIN"])
+    }
+
+    /// Pure selection core (t_eec52a7e unit proof): no CoreAudio calls, so
+    /// a fake device list can drive the phantom-gate / fallback rules.
+    /// `resolve()` above is a thin wrapper over this — keep them in sync by
+    /// keeping ALL logic here.
+    static func resolve(devices all: [Device], defaultID: AudioDeviceID?, pin: String?) -> Device? {
+        if let pin, !pin.isEmpty {
             if let hit = all.first(where: { $0.name.lowercased().contains(pin.lowercased()) }) {
                 return hit
             }
             NSLog("QuickScribe: QUICKSCRIBE_INPUT_PIN='\(pin)' matched no input device — falling back")
         }
-        if let def = defaultInputDevice() {
-            if let d = all.first(where: { $0.id == def }), !d.isVirtual {
-                return d
-            }
+        if let def = defaultID, let d = all.first(where: { $0.id == def }), !d.isVirtual {
+            return d
         }
         return all.first(where: { !$0.isVirtual })
     }

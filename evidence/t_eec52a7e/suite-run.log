@@ -1,0 +1,4 @@
+== full suite rerun 00:38 -0700 ==
+tapstart exit=0 : 1 pass-lines
+level-tap exit=0 : 1 pass-lines
+hotplug exit=0 : 10 pass-lines
