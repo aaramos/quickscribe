@@ -10,11 +10,13 @@ language = "en"
 # Local oMLX OpenAI-compatible endpoint. Key read from ~/.omlx/settings.json (auth.api_key).
 base_url = "http://127.0.0.1:1234/v1"
 # Fast flash-class model for cleanup, verified on this host's oMLX.
-# Qwen3.5-9B-oQ8e-mtp chosen over Qwen3.8-Flash-Next-oQ4e-mtp: the latter has
+# A Qwen3.5-9B build chosen over Qwen3.8-Flash-Next-oQ4e-mtp: the latter has
 # reasoning_effort=medium pinned server-side and burns hundreds of thinking
 # tokens before any visible output (TTFT 6s+, timeouts under load). The 9B
 # produces no reasoning tokens: ~0.65s round-trip for ~50-word polish.
-model = "Qwen3.5-9B-oQ8e-mtp"
+# oQ6e since 2026-10-12 (owner): the oQ8e build is no longer installed on oMLX,
+# and naming a missing model made oMLX fall back to its default (Muse-Glimmer).
+model = "Qwen3.5-9B-oQ6e-mtp"
 timeout_s = 6
 # Periodic 1-token warm ping keeps the model resident in oMLX so the first
 # /polish after >=10min idle is not a cold-start.
