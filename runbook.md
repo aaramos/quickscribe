@@ -38,7 +38,8 @@ POST /transcribe        # multipart: file=<wav 16k mono int16>; query: partial=t
 POST /polish            # json: {"text":"...","profile":"polish"|"rewrite"}
                         -> {"text":"...", "degraded":false}
                         # degraded=true means the polish result is unusable or
-                        # unavailable (LLM down OR a completion with no content)
+                        # unavailable (LLM down, a completion with no content,
+                        # or one cut off at max_tokens)
                         # and the raw text is echoed back; the app retries once,
                         # only while its TTI budget lasts, then inserts raw
 GET  /stt/models        -> {"models":["repo-id",...], "current":"active-repo-id"}

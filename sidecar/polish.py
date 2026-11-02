@@ -92,7 +92,8 @@ class Polisher:
                 await asyncio.sleep(5)
 
     async def _warm_ping(self) -> bool:
-        """Tiny 1-token completion — keeps the model resident in oMLX."""
+        """Tiny completion — keeps the model resident in oMLX. Same
+        chat_template_kwargs as real requests so warm state matches use."""
         try:
             client = self._get_client()
             r = await client.post(
@@ -100,8 +101,9 @@ class Polisher:
                 json={
                     "model": self.model,
                     "messages": [{"role": "user", "content": "ping"}],
-                    "max_tokens": 1,
+                    "max_tokens": 8,
                     "temperature": 0,
+                    "chat_template_kwargs": {"enable_thinking": False},
                 },
                 timeout=120.0,  # first ping may load the model into oMLX
             )
@@ -174,7 +176,9 @@ class Polisher:
     # ---- main operation ---------------------------------------------------------
 
     async def polish(self, text: str, profile: str) -> tuple[str, bool]:
-        """Returns (text, degraded). degraded=True → LLM down, raw echoed back."""
+        """Returns (text, degraded). degraded=True → polish result unusable
+        (LLM down, empty completion, or cut off at max_tokens); raw echoed
+        back per contract."""
         text = text.strip()
         if not text:
             return "", False
@@ -185,9 +189,20 @@ class Polisher:
                 {"role": "user", "content": text},
             ],
             "temperature": 0.3,
-            # Cap output at what the input can plausibly need — fewer tokens,
-            # faster finish on a flash model.
-            "max_tokens": min(2048, max(128, len(text) * 2 // 1)),
+            # Copy-editing does not need chain-of-thought, and thinking mode
+            # is fatal to the TTI budget: live probe 2026-11-01 (the incident
+            # trace the review lacked) — Qwen3.6-35B-A3B-4bit spent 1024/1024
+            # tokens on reasoning and emitted ZERO content tokens at the old
+            # len*2 cap (the false "empty completion"); at 4096 it answered
+            # but took 5.9 s — past every bucket. enable_thinking:false:
+            # 120 ms, finish=stop, clean text. Models whose template lacks
+            # the toggle ignore the kwarg; the headroom below covers them.
+            "chat_template_kwargs": {"enable_thinking": False},
+            # Headroom, not a target: generation stops at the stop token, so
+            # a large cap costs nothing on well-behaved models and saves
+            # stray reasoners from mid-sentence truncation. Wall time stays
+            # bounded by the app's PolishPlanner timeout (t_a0fb24bb).
+            "max_tokens": min(4096, max(1024, len(text) * 8)),
         }
         try:
             client = self._get_client()
@@ -196,6 +211,7 @@ class Polisher:
             # gets tokens the moment our slot opens instead of a flat timeout.
             payload["stream"] = True
             buf = ""
+            finish: str | None = None
             async with client.stream(
                 "POST", f"{self.base_url}/chat/completions", json=payload,
             ) as r:
@@ -207,9 +223,12 @@ class Polisher:
                     if chunk.strip() == "[DONE]":
                         break
                     try:
-                        delta = json.loads(chunk)["choices"][0]["delta"].get("content")
+                        choice = json.loads(chunk)["choices"][0]
                     except (KeyError, IndexError, ValueError):
                         continue
+                    if choice.get("finish_reason"):
+                        finish = choice["finish_reason"]
+                    delta = choice.get("delta", {}).get("content")
                     if delta:
                         buf += delta
             out = buf.strip()
@@ -222,7 +241,13 @@ class Polisher:
                 # hear you — check your mic" blame-the-mic error. Honor the
                 # contract (degraded=True → raw echoed back) so the app
                 # retries once and inserts raw instead (brief §8).
-                log.warning("polish: empty content completion; echoing raw as degraded")
+                log.warning("polish: empty content completion (finish=%s); echoing raw as degraded", finish)
+                return text, True
+            if finish == "length":
+                # Truncated prose silently inserted is WORSE than raw — it
+                # loses information while looking finished (observed live
+                # 2026-11-01: second clause dropped from a two-part sentence).
+                log.warning("polish: completion hit max_tokens (finish=length) — truncated, echoing raw as degraded")
                 return text, True
             return out, False
         except Exception as exc:

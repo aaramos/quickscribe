@@ -47,12 +47,21 @@ hear you*, then no paste".
 Supporting history, already in this repo: `config.toml`'s own comment
 documents this model class burning "hundreds of thinking tokens before any
 visible output", and `max_tokens = max(128, len(text)*2)` leaves room for it.
-**Causation status (t_a0fb24bb):** the *code path* is confirmed (reviewer
-reproduced empty completions against httpx MockTransport). The *trigger* —
-reasoning-token exhaustion from today's model swap — remains a HYPOTHESIS:
-no incident trace was captured on this host. Do not record it as proven
-cause until a live log shows the swapped-in model emitting an empty
-completion for a real capture.
+**Causation status (t_a0fb24bb): CONFIRMED with a live runtime trace
+2026-11-01 21:32–21:41.** After the sidecar was restarted onto the fixed
+code, direct oMLX probes showed `Qwen3.6-35B-A3B-4bit` (today's swap)
+spending **1024/1024 tokens on reasoning with ZERO content tokens**
+(finish=length) at the old `max_tokens = max(128, len*2)` cap; at 4096 it
+does answer, but takes 5.9 s — past every TTI bucket. Through the sidecar
+the same input reproduced the empty-completion degraded echo, and a
+two-clause sentence came back **truncated mid-information** (second
+clause silently dropped). Fix (follow-up commit): polish requests now
+send `chat_template_kwargs: {"enable_thinking": false}` (measured
+120–450 ms, complete text), `max_tokens` got real headroom
+(`min(4096, max(1024, len*8))`) as a backstop for stray reasoners, and
+`finish=length` is treated as degraded→raw — truncated prose is never
+inserted silently. Owner's config model unchanged; oMLX key location
+(`~/.omlx/settings.json`) untouched.
 
 **Fix — three layers (each independently sufficient for the symptom):**
 - `sidecar/polish.py` → `polish()`: empty completion now logs
