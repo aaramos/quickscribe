@@ -4,6 +4,7 @@ FastAPI on 127.0.0.1:8790 per quickscribe/runbook.md contract. Local-only.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -32,6 +33,7 @@ with open(CFG_PATH, "rb") as fh:
 stt_engine = STTEngine(
     model_id=CFG["stt"]["model_id"],
     language=CFG["stt"].get("language", "en"),
+    candidates=CFG["stt"].get("models", []),
 )
 polisher = Polisher(
     base_url=CFG["llm"]["base_url"],
@@ -104,6 +106,27 @@ async def switch_model(body: ModelBody):
         raise HTTPException(status_code=400, detail="model must be non-empty")
     ok, active = await polisher.set_model(name)
     return JSONResponse({"ok": ok, "model": active})
+
+
+@app.get("/stt/models")
+async def list_stt_models():
+    """Candidate transcription models for the menu-bar picker:
+    config [stt] models + active + local HF-cache whisper repos."""
+    return JSONResponse({"models": await asyncio.to_thread(stt_engine.models),
+                         "current": stt_engine.model_id})
+
+
+@app.post("/stt/models")
+async def switch_stt_model(body: ModelBody):
+    """Hot-swap the transcription model — no restart. The candidate is
+    warm-loaded (possibly downloaded) BEFORE committing: on failure the
+    previous model stays active and ok=false is returned (same contract
+    as POST /models for the polish LLM)."""
+    name = body.model.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="model must be non-empty")
+    ok = await asyncio.to_thread(stt_engine.set_model, name)  # load off the event loop
+    return JSONResponse({"ok": ok, "model": stt_engine.model_id})
 
 
 @app.post("/transcribe")

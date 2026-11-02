@@ -21,7 +21,7 @@ The app never touches models. The sidecar never touches your keyboard. They only
 
 ## Install
 
-Requirements: macOS 14+, Python 3.11, a local oMLX server on `127.0.0.1:1234` serving a fast chat model (model name lives in `sidecar/config.toml`), Apple Silicon required for MLX.
+Requirements: macOS 14+, Python 3.11, a local oMLX server on `127.0.0.1:1234` serving a fast chat model (startup defaults live in `sidecar/config.toml` — both the polish LLM and the transcription model are switchable live from the menu bar), Apple Silicon required for MLX.
 
 ### 1. Sidecar
 
@@ -72,7 +72,14 @@ Choose from the menu-bar menu (switchable without relaunch):
 - **Polish** (default) — strip fillers ("um", "you know"), fix mishearings, grammar, punctuation, capitalization. Keeps your voice and word choice.
 - **Rewrite** — tighten into clear sentences, bullets for lists, professional tone. Preserves all information.
 
-If the LLM is unavailable, QuickScribe retries once and then inserts the **raw transcript** rather than making you wait — the overlay says `! LLM down — inserted raw text`.
+If the polish step comes back unusable (LLM down, or a completion with no content), QuickScribe retries once and then inserts the **raw transcript** rather than making you wait — the overlay says `! Polish unavailable — inserted raw text`.
+
+## Models
+
+Two menu-bar submenus, switchable without relaunch:
+
+- **Polish Model** — the local oMLX chat model used for cleanup; the list is live from oMLX.
+- **Transcription Model** — the MLX Whisper model doing STT. Candidates: the `[stt] models` list in `sidecar/config.toml` plus every mlx-community Whisper already in the local Hugging Face cache (pure local scan — the app itself never lists from the network). A switch **warm-loads the candidate before committing** (first switch to a not-yet-downloaded repo fetches it once, then offline); anything failing leaves the previous model active — and the checkmark honestly stays on it. Your choice persists and re-applies even if the sidecar restarts on its config default.
 
 ## Details worth knowing
 

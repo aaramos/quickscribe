@@ -41,11 +41,16 @@ enum InputDeviceResolver {
     }
 
     static func deviceName(_ id: AudioDeviceID) -> String {
-        var nm: CFString = "" as CFString
-        var sz = UInt32(MemoryLayout<CFString>.size)
+        // CoreAudio hands back a BORROWED CFStringRef — read it through
+        // Unmanaged + takeUnretainedValue. The old `var nm: CFString` passed
+        // by `&nm` was exactly the "forming UnsafeMutableRawPointer to a
+        // CFString" warning every harness build emitted (a Swift-managed
+        // reference where a CF object slot is written).
+        var name: Unmanaged<CFString>?
+        var sz = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         var a = address(kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal)
-        AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &nm)
-        return nm as String
+        guard AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &name) == noErr else { return "" }
+        return name?.takeUnretainedValue() as String? ?? ""
     }
 
     static func inputChannels(_ id: AudioDeviceID) -> UInt32 {
@@ -54,10 +59,25 @@ enum InputDeviceResolver {
         guard AudioObjectGetPropertyDataSize(id, &a, 0, nil, &cssz) == noErr, cssz > 0 else { return 0 }
         var buf = [UInt8](repeating: 0, count: Int(cssz))
         guard AudioObjectGetPropertyData(id, &a, 0, nil, &cssz, &buf) == noErr else { return 0 }
-        let bl = buf.withUnsafeBytes { $0.baseAddress!.assumingMemoryBound(to: AudioBufferList.self) }
-        var ch: UInt32 = 0
-        for _ in 0..<Int(bl.pointee.mNumberBuffers) { ch += bl.pointee.mBuffers.mNumberChannels }
-        return ch
+        // AudioBufferList's mBuffers is a variable-length array — Swift only
+        // exposes its FIRST element via the tuple. Summing mBuffers[0].
+        // mNumberBuffers times (the old code) counted one buffer's channels
+        // N times: wrong on aggregate/multi-buffer devices. Walk the raw
+        // memory instead.
+        return buf.withUnsafeBytes { raw -> UInt32 in
+            guard raw.count >= MemoryLayout<AudioBufferList>.size else { return 0 }
+            let list = raw.baseAddress!.assumingMemoryBound(to: AudioBufferList.self)
+            let n = Int(list.pointee.mNumberBuffers)
+            let abSize = MemoryLayout<AudioBuffer>.stride
+            let base = MemoryLayout<AudioBufferList>.offset(of: \AudioBufferList.mBuffers) ?? 0
+            var ch: UInt32 = 0
+            for i in 0..<n {
+                let off = base + i * abSize
+                guard off + abSize <= raw.count else { break }   // truncated property — stop safely
+                ch += raw.load(fromByteOffset: off, as: AudioBuffer.self).mNumberChannels
+            }
+            return ch
+        }
     }
 
     static func defaultInputDevice() -> AudioDeviceID? {

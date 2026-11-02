@@ -215,6 +215,15 @@ class Polisher:
             out = buf.strip()
             self._llm_ready = True
             self._last_probe = time.monotonic()
+            if not out:
+                # 200-but-empty completion: the model consumed max_tokens on
+                # reasoning and emitted zero content tokens. Downstream cannot
+                # tell this from success — it produced the false "Couldn't
+                # hear you — check your mic" blame-the-mic error. Honor the
+                # contract (degraded=True → raw echoed back) so the app
+                # retries once and inserts raw instead (brief §8).
+                log.warning("polish: empty content completion; echoing raw as degraded")
+                return text, True
             return out, False
         except Exception as exc:
             log.warning("polish degraded (LLM unavailable): %s", exc)

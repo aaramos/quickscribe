@@ -17,7 +17,7 @@ final class OverlayController {
         case partial(String, device: String?)
         case processing
         case inserted
-        case degraded        // polish unavailable — raw inserted (brief §8)
+        case degraded        // polish unusable (down OR blank completion) — raw inserted (brief §8)
         case cancelled
         case error(String)
 
@@ -28,7 +28,7 @@ final class OverlayController {
             case .partial(let t, let d): return "● \(t)\(d.map { "  · \($0)" } ?? "")"
             case .processing: return "○ Transcribing…"
             case .inserted: return "✓ Inserted"
-            case .degraded: return "! LLM down — inserted raw text"
+            case .degraded: return "! Polish unavailable — inserted raw text"
             case .cancelled: return "✕ Cancelled"
             case .error(let m): return "! " + m
             }
@@ -131,12 +131,17 @@ final class OverlayController {
 
         // WF1 is full-width: fixed ticker width sized to the screen, not text.
         let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main!
-        let width = min(720, screen.frame.width - 160)
-        var f = panel!.frame
-        f.size = NSSize(width: width, height: 84)
-        f.origin = NSPoint(x: screen.frame.midX - width / 2, y: screen.frame.minY + 88)
-        panel!.setFrame(f, display: true, animate: false)
+        // No forced unwrap: cursor's screen → main → any screen (headless
+        // edge: skip repositioning, show at last frame).
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
+            ?? NSScreen.main ?? NSScreen.screens.first
+        if let screen = screen {
+            let width = min(720, screen.frame.width - 160)
+            var f = panel!.frame
+            f.size = NSSize(width: width, height: 84)
+            f.origin = NSPoint(x: screen.frame.midX - width / 2, y: screen.frame.minY + 88)
+            panel!.setFrame(f, display: true, animate: false)
+        }
 
         wave?.tintColor = newState.tintColor
         wave?.flatline = !newState.isLive     // non-live states decay to flat

@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// SINGLE PLACE for app identity (brief §Naming / acceptance 9).
@@ -13,10 +12,9 @@ enum AppInfo {
     /// PRIMARY hotkey chord (owner UX change 2026-09-18: modifier-only hold;
     /// the old ⌘⌥Space binding was removed — it collided with other apps).
     /// Hold ⌃⌘ = capture start (after `holdDwell` with no key press);
-    /// release either modifier = stop, polish, insert.
-    static let holdModifiers: CGEventFlags = [.maskControl, .maskCommand]
-    /// Hold ⌃⌘⇧ = forced Rewrite profile.
-    static let holdRewriteModifiers: CGEventFlags = [.maskControl, .maskCommand, .maskShift]
+    /// release either modifier = stop, polish, insert. The actual flag masks
+    /// live in HotkeyManager (the single behavioral source of truth); these
+    /// unused constants used to duplicate them and have been removed.
     /// Human-readable labels — defined ONCE here (brief §Naming / acceptance 9).
     static let holdLabel = "⌃⌘"
     static let holdRewriteLabel = "⌃⌘⇧"

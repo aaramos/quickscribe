@@ -37,8 +37,20 @@ POST /transcribe        # multipart: file=<wav 16k mono int16>; query: partial=t
                         -> {"text": "...", "language":"en"}
 POST /polish            # json: {"text":"...","profile":"polish"|"rewrite"}
                         -> {"text":"...", "degraded":false}
-                        # degraded=true when LLM down and raw echoed back
+                        # degraded=true means the polish result is unusable or
+                        # unavailable (LLM down OR a completion with no content)
+                        # and the raw text is echoed back; the app retries once,
+                        # only while its TTI budget lasts, then inserts raw
+GET  /stt/models        -> {"models":["repo-id",...], "current":"active-repo-id"}
+POST /stt/models        # json: {"model":"repo-id"}; candidate is warm-loaded
+                        # (download included) BEFORE committing
+                        -> {"ok":bool,"model":"active-repo-id"}
+                        # ok=false -> previous model stays active, nothing changed
 POST /capture           # history write: {"raw":"...","polished":"...","profile":"...","ms_stt":int,"ms_polish":int}
+                        # NOTE (2026-11-01): NEW ms_stt = wall ms from hotkey
+                        # release to raw-text-ready (tail decode); rows before
+                        # that batch stored the SUM of per-chunk decode times —
+                        # the two are NOT directly comparable.
 GET  /history?limit=50  -> [{"raw":...,"polished":...,"profile":...,"ts":...}]
 ```
 All JSON, UTF-8. No auth (localhost bind 127.0.0.1 only).

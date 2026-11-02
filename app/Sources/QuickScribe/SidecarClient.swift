@@ -87,19 +87,23 @@ final class SidecarClient {
         session.dataTask(with: req) { _, _, _ in }.resume()
     }
 
-    /// GET /models — live oMLX model list for the menu-bar picker.
-    func listModels(timeout: TimeInterval = 4, completion: @escaping (ModelList?) -> Void) {
-        get("/models", timeout: timeout) { (data: Data?) in
+    /// GET /models (polish LLM) or /stt/models (transcription) — live model
+    /// list for the menu-bar pickers. Same shape; only the path differs.
+    func listModels(path: String = "/models", timeout: TimeInterval = 4,
+                    completion: @escaping (ModelList?) -> Void) {
+        get(path, timeout: timeout) { (data: Data?) in
             guard let data = data else { completion(nil); return }
             completion(try? JSONDecoder().decode(ModelList.self, from: data))
         }
     }
 
-    /// POST /models — hot-swap the polish model (no sidecar restart).
-    /// Completion: (ok, activeModel). On failure the previous model stays active.
-    func switchModel(_ model: String, timeout: TimeInterval = 130,
+    /// POST /models | /stt/models — hot-swap the active model (no sidecar
+    /// restart). Completion: (ok, activeModel). On failure the previous model
+    /// stays active. STT switches warm-load (possibly download) a model first,
+    /// so the caller passes a longer timeout.
+    func switchModel(_ model: String, path: String = "/models", timeout: TimeInterval = 130,
                      completion: @escaping (Bool, String?) -> Void) {
-        guard let url = URL(string: "\(AppInfo.sidecarBase)/models") else { completion(false, nil); return }
+        guard let url = URL(string: "\(AppInfo.sidecarBase)\(path)") else { completion(false, nil); return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = timeout

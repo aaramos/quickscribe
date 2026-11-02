@@ -84,6 +84,18 @@ with the owner's audio rig), so it exits FATAL at startup — pre-existing
 environment gap, not a regression. tapstart-proof + level-tap-proof +
 hotplug-proof are the runnable green set.
 
+## Automated unit suite (added 2026-11-01, t_a0fb24bb)
+
+`cd app && swift test` — first test target in this repo
+(`app/Tests/QuickScribeTests`). Covers the pure policy cores only, by
+design: `PolishPlanner` (budget/timeout/retry/stale/blank-result rules +
+flow simulation) and `SidecarHealth` (health-monitor transition table).
+Engine, device, paste, and live-sidecar behavior remain the proof
+harnesses + owner hand test below — harness COMPILATION is not runtime
+acceptance. Known harness-build warning: installTap is deprecated in the
+macOS 27 SDK (t_50da3b54's live-format fix requires it); migration is a
+separate tracked concern, do not silence it.
+
 ## Owner hand test (final acceptance)
 Hold Control+Command in any focused app → overlay pill appears within
 ~100 ms → speak → release → text inserts exactly once.

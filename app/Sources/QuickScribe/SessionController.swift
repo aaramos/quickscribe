@@ -2,7 +2,8 @@ import AppKit
 
 /// The capture-session state machine. Owns the full lifecycle per brief:
 /// hold ⌃⌘ → record (+streaming partials) → release → tail → final STT →
-/// polish (bounded by TTI budget, PM: degraded→retry once→raw) →
+/// polish (PolishPlanner: timeout ≤ remaining budget; degraded OR blank result
+/// → retry once, only while budget remains → raw; exhausted budget = no request) →
 /// insert exactly once → history. Any key press or Esc cancels, sidecar-down
 /// never crashes. (Owner UX change 2026-09-18: hold-only keyboard gesture;
 /// hands-free toggle lives in the menu bar.)
@@ -24,13 +25,14 @@ final class SessionController {
     // Live partial transcription state.
     private var partialText: String = ""       // committed partials (concatenated verbatim)
     private var partialInFlight = false
-    private var pendingChunk: (Data, Double)?  // coalesce: only newest matters while one is in flight
-    private var finalText: String?              // tail result (or full re-transcribe fallback)
+    /// Coalesce by CONCATENATION, never by replacement: chunks are
+    /// non-overlapping audio, so a replaced pending chunk used to silently
+    /// lose its words whenever the sidecar fell behind real time.
+    private var pendingChunks: [Data] = []
     private var chunkFails = 0
     private var captureSeconds: Double = 0
     private var sessionStart = Date()
     private var releaseAt: Date?           // hotkey-release: TTI starts here (brief §Speed)
-    private var sttMs = 0
     private var insertOnce = false              // guarantees insert happens exactly once
     private var generation = 0                  // invalidates in-flight work after cancel
     private var lastPartialRaw = ""            // repeat suppression: identical decoded partial >=2x = hallucination (t_b3e7802c)
@@ -115,11 +117,9 @@ final class SessionController {
         rewriteProfile = rewrite || defaultProfile == "rewrite"
         partialText = ""
         partialInFlight = false
-        pendingChunk = nil
-        finalText = nil
+        pendingChunks.removeAll()
         chunkFails = 0
         insertOnce = false
-        sttMs = 0
         lastPartialRaw = ""
         repeatSuppressed = false
         sessionStart = Date()
@@ -148,8 +148,8 @@ final class SessionController {
         guard mode != .idle else { return }
         mode = .idle
         releaseAt = Date()
-        captureSeconds = capture.stop()   // removes tap first
-        capture.flushTail()               // enqueues tail-chunk dispatch on main
+        captureSeconds = capture.stop()   // removes tap first; buffered PCM survives
+        capture.flushTail()               // emits the still-buffered tail as final chunk
         overlay.show(.processing)
         onPhaseChange?(false)
         // Deferred so the tail chunk's sendChunk (queued during flushTail,
@@ -179,15 +179,15 @@ final class SessionController {
 
     private func sendChunk(wav: Data, partial: Bool) {
         if partialInFlight {
-            pendingChunk = (wav, 0)
+            // Buffer instead of replacing — dropping audio drops words.
+            pendingChunks.append(wav)
             return
         }
         partialInFlight = true
         let gen = generation
-        SidecarClient.shared.transcribe(wav: wav, partial: partial) { [weak self] text, ms in
+        SidecarClient.shared.transcribe(wav: wav, partial: partial) { [weak self] text, _ in
             DispatchQueue.main.async {
                 guard let self = self, self.generation == gen else { return }
-                self.sttMs += ms
                 self.partialInFlight = false
                 let trimmed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
@@ -211,31 +211,43 @@ final class SessionController {
                     // success (silence tail) is normal — t_955de3e6.
                     self.chunkFails += 1
                 }
-                if let (pwav, _) = self.pendingChunk {
-                    self.pendingChunk = nil
-                    self.sendChunk(wav: pwav, partial: self.mode != .idle)
+                if !self.pendingChunks.isEmpty {
+                    let merged = self.takePendingChunks()
+                    self.sendChunk(wav: merged, partial: self.mode != .idle)
                 }
             }
         }
     }
 
+    /// Merge the buffered chunks into one WAV: PCM payloads concatenated
+    /// (all chunks come from WavWriter — fixed-size header), one fresh header.
+    private func takePendingChunks() -> Data {
+        let list = pendingChunks
+        pendingChunks.removeAll()
+        guard list.count > 1 else { return list.first ?? Data() }
+        var pcm = Data()
+        for w in list { pcm.append(w.dropFirst(WavWriter.headerSize)) }
+        return WavWriter.wav(int16LE: pcm, sampleRate: 16000)
+    }
+
     /// After release: raw = concatenated partials (chunks were streamed live,
     /// including the tail flushed in finish()). If any chunk failed, log it and
     /// proceed with what we have; fully-empty → insert nothing (brief §7).
+    /// (No full-audio re-transcribe exists: audio is streamed and discarded
+    /// chunk by chunk, so recovery is "assemble from partials" or nothing.)
     private func resolveFinalText() {
         let gen = generation
         if partialInFlight {
-            // Wait for the in-flight straggler; pendingChunk (if any) is
-            // dispatched by its completion handler.
+            // Wait for the in-flight straggler; pending chunks are dispatched
+            // by its completion handler.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 guard let self = self, self.generation == gen else { return }
                 self.resolveFinalText()
             }
             return
         }
-        if let (pwav, _) = pendingChunk {
-            pendingChunk = nil
-            sendChunk(wav: pwav, partial: false)
+        if !pendingChunks.isEmpty {
+            sendChunk(wav: takePendingChunks(), partial: false)
             return
         }
         var raw = partialText
@@ -271,42 +283,58 @@ final class SessionController {
         let gen = generation
         let prof = profile
         let t0 = Date()
+        // Honest STT metric: wall time hotkey-release → raw text ready
+        // (tail decode). The old value summed EVERY chunk's decode ms,
+        // double-counting work that overlapped the recording itself.
+        let msStt = releaseAt.map { Int(t0.timeIntervalSince($0) * 1000) } ?? 0
         // TTI budget counts from hotkey-RELEASE (releaseAt set in finish());
         // polish may only use what the bucket leaves after tail STT (PM note 2:
-        // late polish must not stretch insertion beyond brief §8).
+        // late polish must not stretch insertion beyond brief §8). Exhausted
+        // budget means NO request — insert raw, degraded (t_a0fb24bb).
         let budget = AppInfo.ttiBudget(utteranceSeconds: captureSeconds)
-        let spent = releaseAt.map { Date().timeIntervalSince($0) } ?? 0
-        let remaining = min(budget, max(0.2, budget - spent))
+        let spent = releaseAt.map { t0.timeIntervalSince($0) } ?? 0
+        runPolish(PolishPlanner.firstStep(budget: budget, spent: spent), raw: raw, prof: prof,
+                  gen: gen, budget: budget, t0: t0, msStt: msStt, attempt: 1)
+    }
 
-        SidecarClient.shared.polish(text: raw, profile: prof, timeout: remaining) { [weak self] polished, degraded in
-            DispatchQueue.main.async {
-                guard let self = self, self.generation == gen else { return }
-                if degraded {
-                    // PM guidance: retry once, then raw (brief §8 — never block past budget).
+    /// Executes one planner decision. All policy — timeout ≤ remaining budget,
+    /// degraded-or-blank → retry once (only while time remains) → raw, and
+    /// stale-callback rejection — is owned by PolishPlanner and unit-tested
+    /// there; this is async plumbing only (t_a0fb24bb). Exactly-once insertion
+    /// remains enforced by `insertOnce` inside insertText.
+    private func runPolish(_ step: PolishPlanner.Step, raw: String, prof: String, gen: Int,
+                           budget: Double, t0: Date, msStt: Int, attempt: Int) {
+        switch step {
+        case .stale:
+            break   // session cancelled / new generation — insertOnce stands
+        case .insertRaw:
+            insertText(raw, raw: raw, profile: prof, degraded: true, polishStarted: t0, msStt: msStt)
+        case .insertPolished(let text):
+            insertText(text, raw: raw, profile: prof, degraded: false, polishStarted: t0, msStt: msStt)
+        case .request(let timeout):
+            SidecarClient.shared.polish(text: raw, profile: prof, timeout: timeout) { [weak self] polished, degraded in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
                     let spent = self.releaseAt.map { Date().timeIntervalSince($0) } ?? 0
-                    let retryBudget = min(budget, max(0.2, budget - spent))
-                    SidecarClient.shared.polish(text: raw, profile: prof, timeout: retryBudget) { [weak self] p2, deg2 in
-                        DispatchQueue.main.async {
-                            guard let self = self, self.generation == gen else { return }
-                            self.insertText(deg2 ? raw : (p2 ?? raw),
-                                           raw: raw, profile: prof, degraded: deg2,
-                                           polishStarted: t0)
-                        }
-                    }
-                } else {
-                    self.insertText(polished ?? raw, raw: raw, profile: prof,
-                                  degraded: false, polishStarted: t0)
+                    let next = PolishPlanner.stepAfterResult(budget: budget, spent: spent, attempt: attempt,
+                                                             stale: self.generation != gen,
+                                                             polished: polished, degraded: degraded)
+                    self.runPolish(next, raw: raw, prof: prof, gen: gen, budget: budget,
+                                   t0: t0, msStt: msStt, attempt: attempt + 1)
                 }
             }
         }
     }
 
     private func insertText(_ text: String, raw: String, profile prof: String,
-                            degraded: Bool, polishStarted: Date) {
+                            degraded: Bool, polishStarted: Date, msStt: Int) {
         guard !insertOnce else { return }   // exactly-once guarantee
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else {
-            overlay.show(.error("Couldn't hear you — check your mic"), autoHideAfter: 2.5)
+            // Only reachable when the RAW text itself is blank — resolveFinalText
+            // never sends an empty raw down, and a blank polish result now falls
+            // back to raw upstream. Don't blame the mic for the polish step.
+            overlay.show(.error("Nothing usable to insert"), autoHideAfter: 2.0)
             return
         }
         // Back-to-back identical insert suppression (t_b3e7802c): the same
@@ -322,14 +350,13 @@ final class SessionController {
             self.insertOnce = true
             if ok { self.lastInsertedText = trimmedText }
             let msPolish = Int(Date().timeIntervalSince(polishStarted) * 1000)
-            let msSTT = self.sttMs
             if ok {
                 self.overlay.show(degraded ? .degraded : .inserted, autoHideAfter: 1.4)
                 if lostImages {
                     NSLog("QuickScribe: clipboard image could not be restored (v1 accepted edge case)")
                 }
                 SidecarClient.shared.capture(raw: raw, polished: text, profile: prof,
-                                             msStt: msSTT, msPolish: msPolish)
+                                             msStt: msStt, msPolish: msPolish)
             } else {
                 self.overlay.show(.error("Insert failed — Accessibility permission?"), autoHideAfter: 2.5)
             }

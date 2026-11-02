@@ -10,17 +10,15 @@ enum Insertion {
         var lostImageData: Bool = false
     }
 
-    private static let keptTypes: [NSPasteboard.PasteboardType] = {
-        var types: [NSPasteboard.PasteboardType] = [
-            .string, .rtf, .rtfd, .html,
-            .tiff, .png,
-            NSPasteboard.PasteboardType("public.file-url"),
-            NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url"),
-            NSPasteboard.PasteboardType("com.apple.is-remote-clipboard")
-        ]
-        // Preserve any unknown registered types we can read as data.
-        return types
-    }()
+    /// Types we can restore verbatim. Anything else is dropped in `data(for:)`
+    /// (allowlist: these types plus any `public.*` / `com.apple.*` readable as data).
+    private static let keptTypes: [NSPasteboard.PasteboardType] = [
+        .string, .rtf, .rtfd, .html,
+        .tiff, .png,
+        NSPasteboard.PasteboardType("public.file-url"),
+        NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url"),
+        NSPasteboard.PasteboardType("com.apple.is-remote-clipboard")
+    ]
 
     static func snapshot(_ pb: NSPasteboard = .general) -> Snapshot {
         var items: [[NSPasteboard.PasteboardType: Data]] = []
@@ -58,13 +56,13 @@ enum Insertion {
         let snap = snapshot(pb)
 
         pb.clearContents()
-        var wroteMarker = false
         let ok = pb.setString(text, forType: .string)
         if ok {
             // Marker lets us recognize (and not re-restore) our own writes.
-            wroteMarker = pb.setData(Data(AppInfo.displayName.utf8), forType: markerType)
+            // If the write fails the marker check below simply treats the
+            // clipboard as "someone else's" and leaves it — conservative, safe.
+            pb.setData(Data(AppInfo.displayName.utf8), forType: markerType)
         }
-        _ = wroteMarker
 
         pasteCmdV()
 

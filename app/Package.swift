@@ -14,6 +14,11 @@ let package = Package(
             name: "QuickScribe",
             dependencies: ["SpecCatch"],
             path: "Sources/QuickScribe"
+        ),
+        .testTarget(
+            name: "QuickScribeTests",
+            dependencies: ["QuickScribe"],
+            path: "Tests/QuickScribeTests"
         )
     ]
 )

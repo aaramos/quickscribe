@@ -62,12 +62,34 @@ def _snapshot_dir(repo_id: str) -> Path:
     return Path(snapshot_download(repo_id=repo_id))
 
 
+_HF_HUB = Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def discover_cached_models() -> list[str]:
+    """Already-downloaded mlx-community whisper repos, decoded from HF hub
+    cache dir names (models--mlx-community--whisper-x -> mlx-community/
+    whisper-x). Pure local scan — the picker's candidate list grows from
+    anything this machine has already fetched, with zero network."""
+    try:
+        out = []
+        for p in _HF_HUB.glob("models--mlx-community--*"):
+            if not ((p / "refs").is_dir() or (p / "snapshots").is_dir()):
+                continue
+            repo = p.name[len("models--"):].replace("--", "/", 1)
+            if "whisper" in repo.lower():
+                out.append(repo)
+        return sorted(out)
+    except OSError:
+        return []
+
+
 class STTEngine:
     def __init__(self, model_id: str, language: str = "en",
-                 temperature: float = 0.0):
+                 temperature: float = 0.0, candidates: list[str] | None = None):
         self.model_id = model_id
         self.language = language
         self.temperature = temperature
+        self._candidates = [c for c in (candidates or []) if c]
         self._ready = False
 
     @property
@@ -82,6 +104,43 @@ class STTEngine:
     )
         self._ready = True
         log.info("STT warm: %s", self.model_id)
+
+    def models(self) -> list[str]:
+        """Candidate transcription models for the menu-bar picker:
+        config-pinned list first, then the active model (always included),
+        then anything already downloaded in the local HF cache.
+        Local-only — never lists from the network."""
+        out: list[str] = []
+        for m in self._candidates + [self.model_id] + discover_cached_models():
+            if m and m not in out:
+                out.append(m)
+        return out
+
+    def set_model(self, model_id: str) -> bool:
+        """Hot-swap the active transcription model — warm-load (resolve/
+        download + one silent decode, mirroring load()) BEFORE committing.
+        On any failure the previous model stays active and False is returned;
+        an in-flight transcribe keeps the model it started with (Python
+        attribute swap is atomic; the decode holds its own reference).
+        Same contract as the polish-model picker."""
+        model_id = model_id.strip()
+        if not model_id:
+            return False
+        if model_id == self.model_id:
+            return True
+        try:
+            mlx_whisper.transcribe(
+                np.zeros(TARGET_SR, dtype=np.float32),
+                path_or_hf_repo=str(_snapshot_dir(model_id)),
+            )
+        except Exception as exc:  # download/network/format problems
+            log.warning("STT switch to %s failed; staying on %s: %s",
+                        model_id, self.model_id, exc)
+            return False
+        self.model_id = model_id
+        self._ready = True
+        log.info("STT model hot-swapped -> %s", model_id)
+        return True
 
     def transcribe(self, wav_bytes: bytes, partial: bool = False) -> str:
         """Transcribe 16k mono int16 WAV bytes. partial=True marks in-flight chunks."""

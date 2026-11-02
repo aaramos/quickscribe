@@ -11,13 +11,22 @@ import SpecCatch
 /// code"). All engine touchpoints must run through this guard.
 enum ExceptionGuard {
     /// Runs `body`; returns nil on success, error description if an
-    /// Objective-C exception (or Swift error) was thrown.
+    /// Objective-C exception OR a Swift error was thrown.
+    ///
+    /// The old implementation ran the body as `try?`, which SILENTLY
+    /// DISCARDED Swift errors — e.g. an `engine.start()` AVAudioError was
+    /// swallowed, start() reported success, the engine never ran, no buffers
+    /// ever arrived, and the session died at "Couldn't hear you" despite a
+    /// working mic. Swift errors now surface like exceptions.
     static func run(_ body: () throws -> Void) -> String? {
         var name: NSString?
         var reason: NSString?
-        if NSException_blockCatch({ try? body() }, &name, &reason) {
-            return "\(name ?? "unknown")/\(reason ?? "(no reason)")"
-        }
+        var swiftError: Error?
+        let caught = NSException_blockCatch({
+            do { try body() } catch { swiftError = error }
+        }, &name, &reason)
+        if caught { return "\(name ?? "unknown")/\(reason ?? "(no reason)")" }
+        if let swiftError { return "swift: \(swiftError)" }
         return nil
     }
 }
@@ -45,21 +54,15 @@ enum AudioPreflight {
         var asz = UInt32(4)
         AudioObjectGetPropertyData(dev, &aa, 0, nil, &asz, &alive)
         guard alive == 1 else { return .failure(Failure(why: "default input device \(dev) is not alive")) }
-        var cssz = UInt32(0)
-        var ac = pa(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeInput)
-        AudioObjectGetPropertyDataSize(dev, &ac, 0, nil, &cssz)
-        guard cssz > 0 else { return .failure(Failure(why: "default input device \(dev) reports no input stream")) }
-        var buf = [UInt8](repeating: 0, count: Int(cssz))
-        AudioObjectGetPropertyData(dev, &ac, 0, nil, &cssz, &buf)
-        let bl = buf.withUnsafeBytes { $0.baseAddress!.assumingMemoryBound(to: AudioBufferList.self) }
-        var ch: UInt32 = 0
-        for i in 0..<Int(bl.pointee.mNumberBuffers) { ch += bl.pointee.mBuffers.mNumberChannels }
+        // Channel count via the ONE correct AudioBufferList walk
+        // (InputDeviceResolver.inputChannels) — this used to duplicate a
+        // broken version that re-read buffer[0] once per buffer.
+        let ch = InputDeviceResolver.inputChannels(dev)
         guard ch > 0 else { return .failure(Failure(why: "default input device \(dev) has 0 input channels")) }
-        var nm: CFString = "" as CFString
-        var nsz = UInt32(MemoryLayout<CFString>.size)
-        var anx = pa(kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal)
-        AudioObjectGetPropertyData(dev, &anx, 0, nil, &nsz, &nm)
-        return .success(Info(deviceID: dev, name: nm as String, channels: ch))
+        // Single shared, correctly-managed name read (was a duplicate
+        // CFString-by-pointer fetch — the harness build warning).
+        let name = InputDeviceResolver.deviceName(dev)
+        return .success(Info(deviceID: dev, name: name, channels: ch))
     }
 }
 
@@ -125,6 +128,9 @@ final class AudioCapture {
 
     func start() throws {
         guard !isCapturing else { return }
+        // Defensive: a previous failed start must never leave a bind dangling —
+        // stop() early-returns while !isCapturing, so nothing else restores it.
+        if let b = bind { InputDeviceResolver.restore(b); bind = nil }
         voicedChunks = 0
         silentChunks = 0
         lastChunkRms = 0
@@ -153,6 +159,7 @@ final class AudioCapture {
         }) {
             engine.stop()
             if let b = bind { InputDeviceResolver.restore(b); bind = nil }
+            activeDevice = nil
             throw CaptureError(why: "tap install: \(exc)")
         }
         isCapturing = true
@@ -176,31 +183,61 @@ final class AudioCapture {
         }
         activeDevice = dev
         bind = InputDeviceResolver.bindForCapture(dev)
-        let inFmt = engine.inputNode.outputFormat(forBus: 0)
-        guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else {
-            throw CaptureError(why: "no live input device (rate=\(inFmt.sampleRate) ch=\(inFmt.channelCount))")
+        // Everything after the bind must unwind it on failure: a thrown error
+        // used to leave the SYSTEM default input switched to `dev` while
+        // isCapturing stayed false — stop() early-returns and never restored,
+        // and the permission-retry below would re-bind and clobber `bind`,
+        // losing the original restore target. The do/catch keeps bind
+        // ownership strictly tied to a running capture window.
+        var engineStarted = false
+        do {
+            let inFmt = engine.inputNode.outputFormat(forBus: 0)
+            guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else {
+                throw CaptureError(why: "no live input device (rate=\(inFmt.sampleRate) ch=\(inFmt.channelCount))")
+            }
+            NSLog("QuickScribe: capture device = '\(dev.name)' (id=\(dev.id), ch=\(dev.channels), virtual=\(dev.isVirtual))")
+            if let exc = ExceptionGuard.run({ [engine] in
+                engine.prepare()
+                try engine.start()
+            }) {
+                throw CaptureError(why: "engine init: \(exc)")
+            }
+            engineStarted = true
+            // macOS 27 trap (t_50da3b54): the pre-start inputNode.outputFormat
+            // can report a nominal rate (16k) that the hardware does NOT come up
+            // at (C920 starts at 48k/2ch). Installing the tap with the stale
+            // pre-start format throws com.apple.coreaudio.avfaudio from
+            // InstallTapOnNode — inside start(), OUTSIDE the ExceptionGuard —
+            // which AppKit swallows: menu click and hotkey both become silent
+            // no-ops. Re-read the LIVE format after start and install the tap
+            // with THAT. Do not revert to using the pre-start format for the tap.
+            let liveFmt = engine.inputNode.outputFormat(forBus: 0)
+            guard liveFmt.sampleRate > 0, liveFmt.channelCount > 0 else {
+                throw CaptureError(why: "live input format invalid (rate=\(liveFmt.sampleRate) ch=\(liveFmt.channelCount))")
+            }
+            liveTapFormat = liveFmt
+            return liveFmt
+        } catch {
+            // Unwind in reverse order of acquisition (t_a0fb24bb): a started
+            // engine must be stopped BEFORE the default-input bind is restored
+            // — stopping afterward races the bind flip — and an engine left
+            // running with isCapturing == false holds the device. stop() can
+            // itself raise (AVFAudio exceptions); bridge it, log, continue.
+            if engineStarted, let exc = ExceptionGuard.run({ [engine] in engine.stop() }) {
+                NSLog("QuickScribe: engine.stop during failed-start unwind raised: \(exc)")
+            }
+            if let b = bind { InputDeviceResolver.restore(b); bind = nil }
+            activeDevice = nil
+            liveTapFormat = nil
+            // Failed engine instance has already pinned the device it tried
+            // (t_eec52a7e lesson: engines pin at first touch for their LIFETIME)
+            // — swap in a fresh one so the next start() re-pins the CURRENT
+            // resolver choice. We are idle by construction here, the same
+            // precondition invalidateEngine asserts.
+            engine = AVAudioEngine()
+            converter = nil
+            throw error
         }
-        NSLog("QuickScribe: capture device = '\(dev.name)' (id=\(dev.id), ch=\(dev.channels), virtual=\(dev.isVirtual))")
-        if let exc = ExceptionGuard.run({ [engine] in
-            engine.prepare()
-            try engine.start()
-        }) {
-            throw CaptureError(why: "engine init: \(exc)")
-        }
-        // macOS 27 trap (t_50da3b54): the pre-start inputNode.outputFormat
-        // can report a nominal rate (16k) that the hardware does NOT come up
-        // at (C920 starts at 48k/2ch). Installing the tap with the stale
-        // pre-start format throws com.apple.coreaudio.avfaudio from
-        // InstallTapOnNode — inside start(), OUTSIDE the ExceptionGuard —
-        // which AppKit swallows: menu click and hotkey both become silent
-        // no-ops. Re-read the LIVE format after start and install the tap
-        // with THAT. Do not revert to using the pre-start format for the tap.
-        let liveFmt = engine.inputNode.outputFormat(forBus: 0)
-        guard liveFmt.sampleRate > 0, liveFmt.channelCount > 0 else {
-            throw CaptureError(why: "live input format invalid (rate=\(liveFmt.sampleRate) ch=\(liveFmt.channelCount))")
-        }
-        liveTapFormat = liveFmt
-        return liveFmt
     }
 
     /// Drop the pinned engine so the NEXT start() binds the current default
@@ -226,8 +263,9 @@ final class AudioCapture {
     }
 
     /// Flush any buffered audio (< chunk boundary) as the final "tail" WAV.
-    /// Called on hotkey release before stop so the tail goes out immediately.
-    /// Still RMS-gated — a silent tail is never emitted (t_b3e7802c).
+    /// Called from finish() after stop() — the PCM already sits in `pending`,
+    /// so engine teardown does not affect it. Still RMS-gated: a silent tail
+    /// is never emitted (t_b3e7802c).
     func flushTail() {
         guard flushSamples > 0 else { return }
         emitChunk()
@@ -302,6 +340,11 @@ final class AudioCapture {
 }
 
 enum WavWriter {
+    /// Exact byte size of the header written below (44) — callers merging
+    /// WAV payloads (SessionController.takePendingChunks) drop this prefix to
+    /// get at the raw int16 PCM. Keep in sync with `wav(int16LE:sampleRate:)`.
+    static let headerSize = 44
+
     /// Minimal RIFF/WAVE writer: 16-bit PCM mono.
     static func wav(int16LE data: Data, sampleRate: UInt32) -> Data {
         var out = Data()
