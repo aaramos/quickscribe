@@ -1,0 +1,25 @@
+Apple modes after the 2026-11-03 prompt and check changes. Scripted dictations, Samantha voice.
+
+TYPED
+CLEANUP  (a dictation passes when every required fact survives and no abandoned word remains)
+  version                          pass  wrong-num  answered  refused  caught  errors  median s  slowest s
+  apple_active_voice               47/50          1         0        0      10       0       0.6        1.9
+      misses: d08: kept 0123; d17:lost like to know; d37:lost overdose
+  apple_concise                    47/50          0         0        0      12       0       0.5        1.4
+      misses: d17:lost like to know; d20:lost actual cost; d42:lost civilians
+  apple_polish                     49/50          1         0        0       5       0       0.4        1.3
+      misses: d08: kept oh one two three
+  apple_rewrite                    47/50          0         0        0       9       0       0.4        1.5
+      misses: d14:lost forgot; d38:lost kill; d41:lost kids
+
+THROUGH APPLE SPEECH (saved transcripts)
+CLEANUP  (a dictation passes when every required fact survives and no abandoned word remains)
+  version                          pass  wrong-num  answered  refused  caught  errors  median s  slowest s
+  apple_active_voice               40/50          1         0        0      11       0       0.5        1.9
+      misses: d01:lost 3; d03: kept six; d05:lost 12; d17:lost like to know; d29:lost 4.2; d32:lost pytest; d33:lost fourth; d36:lost cell; d37:lost overdose; d44:lost hacker
+  apple_concise                    40/50          1         0        0      15       0       0.5        1.3
+      misses: d04: kept 1200; d05:lost 12; d17:lost like to know; d20:lost actual cost; d29:lost 4.2; d32:lost pytest; d33:lost fourth; d36:lost cell; d42:lost civilians; d44:lost hacker
+  apple_polish                     43/50          1         0        0       5       0       0.5        1.4
+      misses: d03: kept six; d05:lost 12; d29:lost 4.2; d32:lost pytest; d33:lost fourth; d36:lost cell; d44:lost hacker
+  apple_rewrite                    40/50          1         0        0       9       0       0.4        1.3
+      misses: d03: kept six; d05:lost 12; d14:lost forgot; d29:lost 4.2; d32:lost pytest; d33:lost fourth; d36:lost cell; d38:lost kill; d41:lost kids; d44:lost hacker

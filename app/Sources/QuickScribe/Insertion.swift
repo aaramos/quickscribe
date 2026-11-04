@@ -50,6 +50,22 @@ enum Insertion {
 
     static let markerType = NSPasteboard.PasteboardType("com.quickscribe.internal")
 
+    /// Puts the text on the clipboard and leaves it there.
+    @discardableResult
+    static func copy(_ text: String) -> Bool {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        return pb.setString(text, forType: .string)
+    }
+
+    /// Pastes when the focused app might accept it, and leaves the text on the clipboard
+    /// so it isn't lost if that app turns out to have nowhere to put it.
+    static func pasteAndKeep(_ text: String) -> Bool {
+        let ok = copy(text)
+        if ok { pasteCmdV() }
+        return ok
+    }
+
     /// Insert text into the focused app. `completion(onMain, ok, restoreLostImages)`.
     static func insert(_ text: String, completion: @escaping (Bool, Bool) -> Void) {
         let pb = NSPasteboard.general
@@ -98,5 +114,39 @@ enum Insertion {
         up?.flags = .maskCommand
         down?.post(tap: .cgSessionEventTap)
         up?.post(tap: .cgSessionEventTap)
+    }
+}
+
+/// Where dictated text can go, judged from what has keyboard focus right now.
+enum InsertionTarget: Equatable {
+    case textField
+    case notText
+    /// Web and Electron apps often don't say what's focused, so a real text box can look
+    /// like nothing at all. Treating these as "not text" would stop pasting in those apps.
+    case unsure
+
+    private static let textRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
+    private static let vagueRoles: Set<String> = ["AXWebArea", "AXGroup", "AXUnknown"]
+
+    static func classify(role: String?, hasTextCursor: Bool) -> InsertionTarget {
+        guard let role else { return .unsure }
+        if textRoles.contains(role) || hasTextCursor { return .textField }
+        return vagueRoles.contains(role) ? .unsure : .notText
+    }
+
+    static func current() -> InsertionTarget {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.2)   // a hung app must not delay the text
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else {
+            return classify(role: nil, hasTextCursor: false)
+        }
+        let element = focused as! AXUIElement
+        var role: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        var cursorSettable = DarwinBoolean(false)
+        AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &cursorSettable)
+        return classify(role: role as? String, hasTextCursor: cursorSettable.boolValue)
     }
 }

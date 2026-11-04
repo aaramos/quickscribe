@@ -3,7 +3,7 @@ import QuickScribeCore
 
 /// The capture-session state machine: hold ⌃⌘, record while Apple's recognizer
 /// listens, release, tidy with rules, clean with Apple's model within the time budget,
-/// insert exactly once, save to history. Any key press or Esc cancels. Whatever the
+/// insert exactly once. Any key press or Esc cancels. Whatever the
 /// model does, the person's words get inserted.
 @MainActor
 final class SessionController {
@@ -25,7 +25,6 @@ final class SessionController {
     let hotkeys = HotkeyManager()
 
     private let prompts: PromptLibrary
-    private let history: HistoryStore
     private let cleaner = AppleCleaner()
     private var transcription: LiveTranscription?
     private var captureSeconds: Double = 0
@@ -36,9 +35,8 @@ final class SessionController {
     /// Menu bar needs to know when sessions start/end (icon state, menu disable).
     var onPhaseChange: ((Bool) -> Void)?
 
-    init(prompts: PromptLibrary, history: HistoryStore) {
+    init(prompts: PromptLibrary) {
         self.prompts = prompts
-        self.history = history
         hotkeys.onIntent = { [weak self] intent in
             Task { @MainActor in self?.handle(intent: intent) }
         }
@@ -150,7 +148,9 @@ final class SessionController {
         insertOnce = false
         let gen = generation
         let live = LiveTranscription { [weak self] words in
-            DispatchQueue.main.async { self?.showPartial(words, generation: gen) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.showWords(words, generation: gen) }
+            }
         }
         transcription = live
         capture.onBuffer = { live.append($0) }
@@ -172,8 +172,8 @@ final class SessionController {
             return
         }
         mode = .pushToTalk
-        overlay.resetWave()
-        overlay.show(.recording(device: capture.activeDevice?.name))   // same runloop tick as hotkey → <100ms (brief)
+        overlay.resetLevels()
+        overlay.show(.recording(mode: RefineMode.title(forProfile: profile)))   // same tick as the hotkey, so it feels instant
         onPhaseChange?(true)
     }
 
@@ -217,9 +217,9 @@ final class SessionController {
 
     // MARK: - Transcript
 
-    private func showPartial(_ words: String, generation gen: Int) {
+    private func showWords(_ words: String, generation gen: Int) {
         guard generation == gen, mode != .idle, !words.isEmpty else { return }
-        overlay.show(.partial(words, device: capture.activeDevice?.name))
+        overlay.show(.recording(mode: RefineMode.title(forProfile: profile), words: words))
     }
 
     private func transcriptionFailed(_ error: Error, generation gen: Int) {
@@ -266,7 +266,7 @@ final class SessionController {
                                            budget: AppInfo.ttiBudget(utteranceSeconds: captureSeconds),
                                            spent: spent)
         guard case .askModel(let timeout, let tidied) = step else {
-            carryOut(step, raw: raw, profile: prof)
+            carryOut(step)
             return
         }
         let instructions = prompts.prompt(prof)
@@ -276,24 +276,31 @@ final class SessionController {
                 try await cleaner.clean(tidied, instructions: instructions)
             }
             guard let self, self.generation == gen else { return }
-            self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied), raw: raw, profile: prof)
+            self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied))
         }
     }
 
-    private func carryOut(_ step: PolishPlanner.Step, raw: String, profile prof: String) {
+    private func carryOut(_ step: PolishPlanner.Step) {
         guard case .insert(let text, let cleaned) = step else { return }
-        insertText(text, raw: raw, profile: prof, degraded: !cleaned)
+        insertText(text, degraded: !cleaned)
     }
 
-    private func insertText(_ text: String, raw: String, profile prof: String, degraded: Bool) {
+    private func insertText(_ text: String, degraded: Bool) {
         guard !insertOnce else { return }   // exactly-once guarantee
         insertOnce = true
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             overlay.show(.error("Nothing usable to insert"), autoHideAfter: 2.0)
             return
         }
-        // Saved even when the paste fails, so the words can still be recovered.
-        history.add(HistoryEntry(raw: raw, polished: text, profile: prof, ts: Date().timeIntervalSince1970))
+        switch InsertionTarget.current() {
+        case .textField: break
+        case .notText:
+            showClipboardResult(Insertion.copy(text))
+            return
+        case .unsure:
+            showClipboardResult(Insertion.pasteAndKeep(text))
+            return
+        }
         Insertion.insert(text) { [weak self] ok, lostImages in
             guard let self else { return }
             if ok {
@@ -305,6 +312,10 @@ final class SessionController {
                 self.overlay.show(.error("Insert failed. Check Accessibility permission."), autoHideAfter: 2.5)
             }
         }
+    }
+
+    private func showClipboardResult(_ ok: Bool) {
+        overlay.show(ok ? .copied : .error("Couldn't copy to the clipboard."), autoHideAfter: 2.0)
     }
 
     // Expose overlay + hotkey start to the app delegate.

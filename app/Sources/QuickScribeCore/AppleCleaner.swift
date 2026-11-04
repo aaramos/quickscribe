@@ -55,9 +55,14 @@ public struct AppleCleaner: Sendable {
         } catch {
             throw Self.classify(error)
         }
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.withoutTrailingSpaces(output).trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { throw CleanupFailure.blank }
         return trimmed
+    }
+
+    /// The model ends lines with invisible Markdown spaces, which shouldn't reach a document.
+    static func withoutTrailingSpaces(_ text: String) -> String {
+        text.replacingOccurrences(of: #"[ \t]+(?=\n|$)"#, with: "", options: .regularExpression)
     }
 
     public var contextSize: Int { model.contextSize }

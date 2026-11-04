@@ -1,71 +1,68 @@
 import AppKit
 import QuartzCore
 
-/// WF1 overlay (t_3db202e7, owner-picked from t_bdf8672e concept board):
-/// full-width ticker — live waveform driven by REAL input levels from
-/// AudioCapture's level tap, transcript text underneath. Appears within
-/// ~1 frame of hotkey press (brief: 100 ms perceived-latency requirement).
-/// Ignores keyboard and mouse so it never steals focus from the target app.
-///
-/// All legacy states still work: recording, partials, processing, inserted,
-/// degraded/cancelled, and the couldn't-hear-you error (waveform flatlines
-/// + error text).
+/// The floating pill under the menu bar, in the spirit of the iPhone's Dynamic Island.
+/// It uses Apple's own Liquid Glass, SF Symbols, system font and system colors, so it
+/// follows light and dark mode, Reduce Motion and Reduce Transparency by itself. It starts
+/// small and grows to show the last few words as you speak. Those words are raw, so the
+/// pasted text can differ once cleanup has run.
+@MainActor
 final class OverlayController {
     enum State: Equatable {
         case hidden
-        case recording(device: String?)
-        case partial(String, device: String?)
+        case recording(mode: String, words: String = "")
         case processing
         case inserted
-        case degraded        // model unavailable, refused or too slow: rule-tidied text inserted
+        case degraded        // model unavailable, refused or too slow: tidied text inserted
         case cancelled
+        case copied          // nowhere to paste: the text is on the clipboard
         case modeChanged(String)
         case error(String)
 
-        var label: String {
+        var message: String {
             switch self {
-            case .hidden: return ""
-            case .recording(let d): return "● Recording \(d.map { "· \($0)" } ?? "")  (Esc to cancel)"
-            case .partial(let t, let d): return "● \(t)\(d.map { "  · \($0)" } ?? "")"
-            case .processing: return "○ Transcribing…"
-            case .inserted: return "✓ Inserted"
-            case .degraded: return "! AI cleanup skipped, inserted your words as spoken"
-            case .cancelled: return "✕ Cancelled"
-            case .modeChanged(let name): return "✓ Mode: \(name)"
-            case .error(let m): return "! " + m
+            case .hidden, .inserted: return ""
+            case .recording(let mode, let words): return words.isEmpty ? mode : words
+            case .processing: return "Cleaning up…"
+            case .degraded: return "Inserted without AI cleanup"
+            case .cancelled: return "Cancelled"
+            case .copied: return "Copied to clipboard"
+            case .modeChanged(let name): return name
+            case .error(let text): return text
             }
         }
 
-        var showsDot: Bool {
+        var symbol: (name: String, color: NSColor)? {
             switch self {
-            case .hidden: return false
-            default: return true
+            case .hidden, .recording, .processing: return nil
+            case .inserted: return ("checkmark.circle.fill", .systemGreen)
+            case .degraded: return ("exclamationmark.triangle.fill", .systemOrange)
+            case .cancelled: return ("xmark.circle.fill", .secondaryLabelColor)
+            case .copied: return ("doc.on.clipboard.fill", .controlAccentColor)
+            case .modeChanged: return ("text.badge.checkmark", .controlAccentColor)
+            case .error: return ("exclamationmark.circle.fill", .systemOrange)
             }
         }
 
-        /// Waveform is fed by live mic levels only in these states.
-        var isLive: Bool {
-            switch self {
-            case .recording, .partial: return true
-            default: return false
-            }
-        }
-
-        var tintColor: NSColor {
-            switch self {
-            case .recording, .partial: return .systemRed
-            case .processing: return .systemYellow
-            case .inserted, .modeChanged: return .systemGreen
-            case .degraded: return .systemOrange
-            case .cancelled, .error: return .systemGray
-            case .hidden: return .clear
-            }
+        var isRecording: Bool {
+            if case .recording = self { return true }
+            return false
         }
     }
 
-    private var panel: NSPanel?
-    private var label: NSTextField?
-    private var wave: WaveformView?
+    private static let height: CGFloat = 40
+    private static let recordingHeight: CGFloat = 78
+    private static let maxWidth: CGFloat = 520
+    private static let gapBelowMenuBar: CGFloat = 8
+
+    private let panel: NSPanel
+    private let icon = NSImageView()
+    private let spinner = NSProgressIndicator()
+    private let levels = WaveformView()
+    private let label = NSTextField(labelWithString: "")
+    private let row = NSStackView()
+    private let glass = NSGlassEffectView()
+    private var stackedWidthLimits: [NSLayoutConstraint] = []
     private var autoHide: Timer?
     private(set) var state: State = .hidden
 
@@ -73,212 +70,273 @@ final class OverlayController {
     var onEscape: (() -> Void)?
 
     init() {
-        let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 84),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered, defer: false)
-        p.isFloatingPanel = true
-        p.level = .statusBar
-        p.hidesOnDeactivate = false
-        p.ignoresMouseEvents = true
-        p.becomesKeyOnlyIfNeeded = false
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.hasShadow = true
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 120, height: Self.height),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .statusBar
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false       // Liquid Glass draws its own edge and depth
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.contentView = makeContent()
 
-        let v = NSView(frame: p.contentView!.bounds)
-        v.wantsLayer = true
-        v.layer?.cornerRadius = 16
-        v.layer?.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 0.92).cgColor
-        v.layer?.borderWidth = 1
-        v.layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.14).cgColor
-
-        // WF1: waveform ticker on top, transcript underneath.
-        let waveView = WaveformView(frame: NSRect(x: 16, y: 36, width: 688, height: 36))
-        waveView.autoresizingMask = [.width]
-        v.addSubview(waveView)
-        wave = waveView
-
-        let field = NSTextField(labelWithString: "")
-        field.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        field.textColor = .white
-        field.lineBreakMode = .byTruncatingHead
-        field.frame = NSRect(x: 16, y: 10, width: 688, height: 20)
-        field.maximumNumberOfLines = 1
-        field.autoresizingMask = [.width]
-        v.addSubview(field)
-        label = field
-
-        p.contentView = v
-        panel = p
-
-        // Global key monitor for Esc during capture (we never own key focus).
-        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] ev in
-            if ev.keyCode == 53 { self?.onEscape?() }
+        // Global monitor because this app never takes key focus.
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 { MainActor.assumeIsolated { self?.onEscape?() } }
         }
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] ev in
-            if ev.keyCode == 53 { self?.onEscape?(); return nil }
-            return ev
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            MainActor.assumeIsolated { self?.onEscape?() }
+            return nil
         }
+    }
+
+    private func makeContent() -> NSView {
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        label.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
+        label.alignment = .center
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        [icon, spinner, levels, label].forEach(row.addArrangedSubview)
+        // A centered vertical stack ignores its side padding, so hold the content to it.
+        stackedWidthLimits = [levels, label].map {
+            $0.widthAnchor.constraint(lessThanOrEqualTo: row.widthAnchor, constant: -36)
+        }
+        arrange(forRecording: false)
+        glass.contentView = row
+        return glass
+    }
+
+    /// While recording: waves centered on top, words centered below. Otherwise one line.
+    private func arrange(forRecording recording: Bool) {
+        stackedWidthLimits.forEach { $0.isActive = recording }
+        row.orientation = recording ? .vertical : .horizontal
+        row.alignment = recording ? .centerX : .centerY
+        row.spacing = recording ? 2 : 8
+        row.edgeInsets = recording
+            ? NSEdgeInsets(top: 6, left: 18, bottom: 8, right: 18)
+            : NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 16)
+        glass.cornerRadius = recording ? 28 : Self.height / 2
     }
 
     func show(_ newState: State, autoHideAfter: TimeInterval? = nil) {
+        autoHide?.invalidate()
+        autoHide = nil
+        let wasHidden = state == .hidden || !panel.isVisible
         state = newState
-        guard newState != .hidden else { panel?.orderOut(nil); return }
-        autoHide?.invalidate(); autoHide = nil
+        guard newState != .hidden else { fadeOut(); return }
 
-        label?.stringValue = newState.label
-        label?.textColor = (newState == .cancelled) ? NSColor(calibratedWhite: 0.8, alpha: 1) : .white
+        apply(newState)
+        place(animated: !wasHidden)
+        if wasHidden { fadeIn() }
 
-        // WF1 is full-width: fixed ticker width sized to the screen, not text.
-        let mouse = NSEvent.mouseLocation
-        // No forced unwrap: cursor's screen → main → any screen (headless
-        // edge: skip repositioning, show at last frame).
-        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
-            ?? NSScreen.main ?? NSScreen.screens.first
-        if let screen = screen {
-            let width = min(720, screen.frame.width - 160)
-            var f = panel!.frame
-            f.size = NSSize(width: width, height: 84)
-            f.origin = NSPoint(x: screen.frame.midX - width / 2, y: screen.frame.minY + 88)
-            panel!.setFrame(f, display: true, animate: false)
-        }
-
-        wave?.tintColor = newState.tintColor
-        wave?.flatline = !newState.isLive     // non-live states decay to flat
-        if newState == .cancelled || newState == .inserted || newState == .degraded {
-            // Clear old transcript off the ticker so it doesn't ghost through.
-            if newState == .cancelled { wave?.reset() }
-        }
-        panel?.orderFrontRegardless()
-
-        if let t = autoHideAfter {
-            autoHide = Timer.scheduledTimer(withTimeInterval: t, repeats: false) { [weak self] _ in
-                self?.show(.hidden)
+        if let autoHideAfter {
+            autoHide = Timer.scheduledTimer(withTimeInterval: autoHideAfter, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.show(.hidden) }
             }
         }
     }
 
-    /// LEVEL TAP sink — the session controller wires AudioCapture.onLevel
-    /// here. Levels arrive on a background queue; hop to main for redraw.
-    func pushLevel(_ level: Double) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.state.isLive else { return }
-            self.wave?.push(level: level)
+    private func apply(_ state: State) {
+        arrange(forRecording: state.isRecording)
+        label.stringValue = state.message
+        label.isHidden = state.message.isEmpty
+        if case .recording(_, let words) = state {
+            label.textColor = words.isEmpty ? .secondaryLabelColor : .labelColor
+            label.lineBreakMode = .byTruncatingHead   // the newest words matter most
+        } else {
+            label.textColor = .labelColor
+            label.lineBreakMode = .byTruncatingTail
+        }
+        levels.isHidden = !state.isRecording
+        levels.isAnimating = state.isRecording
+        if state == .processing {
+            spinner.isHidden = false
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+            spinner.isHidden = true
+        }
+        if let symbol = state.symbol {
+            icon.image = NSImage(systemSymbolName: symbol.name, accessibilityDescription: state.message)
+            icon.contentTintColor = symbol.color
+            icon.isHidden = false
+        } else {
+            icon.isHidden = true
+        }
+        panel.setAccessibilityLabel(state.message.isEmpty ? "Inserted" : state.message)
+    }
+
+    /// Top center of whichever screen the pointer is on, just under the menu bar.
+    private func place(animated: Bool) {
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let fitted = row.fittingSize.width
+        let height = state.isRecording ? Self.recordingHeight : Self.height
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) })
+            ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        var width = min(max(fitted, height), min(Self.maxWidth, screen.visibleFrame.width - 48))
+        // While words are arriving it only grows, so it doesn't jitter from word to word.
+        if animated, state.isRecording, panel.frame.height == height { width = max(width, panel.frame.width) }
+        let frame = NSRect(x: screen.visibleFrame.midX - width / 2,
+                           y: screen.visibleFrame.maxY - height - Self.gapBelowMenuBar,
+                           width: width, height: height)
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            panel.setFrame(frame, display: true)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(frame, display: true)
         }
     }
 
-    /// Reset the ticker (new session start).
-    func resetWave() {
-        wave?.reset()
+    private func fadeIn() {
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    private func fadeOut() {
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.18
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // A new state may have arrived during the fade.
+                if self?.state == .hidden { self?.panel.orderOut(nil) }
+            }
+        })
+    }
+
+    /// Levels arrive on the audio thread.
+    nonisolated func pushLevel(_ level: Double) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.state.isRecording else { return }
+                self.levels.push(level)
+            }
+        }
+    }
+
+    /// For layout tests: the pill's current window and content.
+    var panelFrameForTesting: NSRect { panel.frame }
+    var panelContentForTesting: NSView? { panel.contentView }
+    var panelIsVisibleForTesting: Bool { panel.isVisible }
+
+    func resetLevels() {
+        levels.reset()
     }
 }
 
-/// WF1 ticker canvas: a scrolling bar waveform driven by real mic RMS.
-/// Attack/release smoothing per concept board (attack 60 ms / release 240
-/// ms), redrawn at 60 fps ONLY while live — flatline states stop the timer
-/// so idle CPU stays zero.
+/// Flowing strands of colored light whose height follows the real mic level. It only
+/// redraws while recording, at 30 frames a second, so it costs nothing the rest of the time.
 final class WaveformView: NSView {
-    var tintColor: NSColor = .systemRed { didSet { needsDisplay = true } }
-    /// When true the trace decays to a flat line (non-live states) and the
-    /// display timer stops once flat.
-    var flatline = false { didSet { if flatline { startDecay() } } }
+    private static let strandCount = 9
+    private static let violet = NSColor(srgbRed: 0.56, green: 0.42, blue: 1.0, alpha: 1)
+    private static let indigo = NSColor(srgbRed: 0.33, green: 0.27, blue: 0.98, alpha: 1)
+    private static let blue = NSColor(srgbRed: 0.20, green: 0.36, blue: 1.0, alpha: 1)
+    private static let gradient = NSGradient(colors: [violet, indigo, blue, indigo, violet])
+    /// The bright center line. White glows on dark glass but would vanish on light glass,
+    /// so light mode uses a deep indigo instead.
+    private static let glowOnDark = NSGradient(colors: [violet, .white, .white, .white, violet])
+    private static let coreOnLight = NSGradient(colors: [indigo, blue, indigo])
 
-    private var smoothed: [CGFloat] = []
-    private var lastRaw: CGFloat = 0
-    private var timer: Timer?
-    private let capacity: Int = 160            // ~2.7s of history at 60fps
-    private let attack: CGFloat = 0.22        // fast rise (~60ms to peak)
-    private let release: CGFloat = 0.055      // slow fall (~240ms to settle)
-    private let baseline: CGFloat = 1.5
+    private var target: CGFloat = 0
+    private var level: CGFloat = 0
+    private var phase: CGFloat = 0
+    private var link: CADisplayLink?
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    deinit { timer?.invalidate() }
-
-    /// Feed one smoothed sample (called on main at ~60 fps from the tap).
-    func push(level raw: Double) {
-        // Attack/release envelope smoothing.
-        let x = CGFloat(max(0, min(1, raw)))
-        let coeff = x > lastRaw ? attack : release
-        lastRaw += (x - lastRaw) * coeff
-        smoothed.append(lastRaw)
-        if smoothed.count > capacity { smoothed.removeFirst(smoothed.count - capacity) }
-        if timer == nil {
-            // 60 fps redraw only while the ticker exists and is live.
-            timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                self?.needsDisplay = true
-            }
+    /// Starts and stops the redraws.
+    var isAnimating = false {
+        didSet {
+            guard isAnimating != oldValue else { return }
+            link?.invalidate()
+            link = nil
+            guard isAnimating else { return }
+            let newLink = displayLink(target: self, selector: #selector(step))
+            newLink.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
+            newLink.add(to: .main, forMode: .common)
+            link = newLink
         }
+    }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 180, height: 44) }
+
+    func push(_ newLevel: Double) {
+        target = CGFloat(Self.loudness(fromLevel: newLevel))
+    }
+
+    /// Normal speech is far quieter than the mic's full range, so a straight reading barely
+    /// registers. Ears hear loudness in decibels, so this maps the range speech really uses
+    /// (-48 dB, the silence floor, up to -22 dB) onto the waves' full height.
+    static func loudness(fromLevel level: Double) -> Double {
+        let rms = level / 6       // AudioCapture reports its level as rms x 6
+        guard rms > 0 else { return 0 }
+        return max(0, min(1, (20 * log10(rms) + 48) / 26))
     }
 
     func reset() {
-        smoothed.removeAll()
-        lastRaw = 0
-        flatline = false
-        timer?.invalidate(); timer = nil
+        target = 0
+        level = 0
         needsDisplay = true
     }
 
-    private func startDecay() {
-        // Pull the envelope toward zero over ~20 frames, then stop drawing
-        // updates (flat line remains, zero CPU).
-        if timer == nil {
-            timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                guard let self = self else { return }
-                var moving = false
-                for i in self.smoothed.indices {
-                    if self.smoothed[i] > 0.004 { self.smoothed[i] *= 0.88; moving = true }
-                    else { self.smoothed[i] = 0 }
-                }
-                self.lastRaw *= 0.88
-                self.needsDisplay = true
-                if !moving { self.timer?.invalidate(); self.timer = nil }
-            }
-        }
+    @objc private func step() {
+        level += (target - level) * (target > level ? 0.6 : 0.16)
+        // With Reduce Motion the strands stop flowing and only rise and fall with your voice.
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { phase += 0.08 + level * 0.22 }
+        needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let h = bounds.height
-        let mid = h / 2
-        let cx = bounds.width / 2
-
-        // Baseline (always, dim) — the "couldn't hear you" flatline is just
-        // the baseline with no bars, per the concept board.
-        NSColor(calibratedWhite: 1, alpha: 0.14).setStroke()
-        let base = NSBezierPath()
-        base.lineWidth = 1
-        base.move(to: NSPoint(x: 0, y: mid))
-        base.line(to: NSPoint(x: bounds.width, y: mid))
-        base.stroke()
-
-        guard !smoothed.isEmpty else { return }
-
-        let gap: CGFloat = 3
-        let barW: CGFloat = 2
-        // Right-anchored: newest sample at the right edge, scrolling left.
-        var x = bounds.width - CGFloat(smoothed.count) * (barW + gap)
-        tintColor.setStroke()
-        for a in smoothed {
-            let amp = max(baseline, a * (mid - 2))
-            let p = NSBezierPath()
-            p.lineWidth = barW
-            p.lineCapStyle = .round
-            // Center at the midline; alpha rises with amplitude.
-            p.appendArc(withCenter: NSPoint(x: x + barW / 2, y: mid + amp), radius: barW / 2, startAngle: 0, endAngle: 360)
-            p.appendArc(withCenter: NSPoint(x: x + barW / 2, y: mid - amp), radius: barW / 2, startAngle: 0, endAngle: 360)
-            p.move(to: NSPoint(x: x + barW / 2, y: mid + amp))
-            p.line(to: NSPoint(x: x + barW / 2, y: mid - amp))
-            let alpha = 0.25 + 0.75 * Double(a)
-            tintColor.withAlphaComponent(alpha).setStroke()
-            p.stroke()
-            x += barW + gap
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        for strand in 0..<Self.strandCount {
+            let offset = CGFloat(strand) / CGFloat(Self.strandCount - 1) * 2 - 1    // -1 to 1
+            context.saveGState()
+            context.setAlpha(1 - abs(offset) * 0.65)
+            context.setLineCap(.round)
+            context.addPath(strandPath(offset: offset).cgPath)
+            context.setLineWidth(strand == Self.strandCount / 2 ? 1.8 : 1)
+            context.replacePathWithStrokedPath()
+            context.clip()
+            let isCore = strand == Self.strandCount / 2
+            (isCore ? coreGradient : Self.gradient)?.draw(in: bounds, angle: 0)
+            context.restoreGState()
         }
-        _ = cx
+    }
+
+    private var coreGradient: NSGradient? {
+        effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? Self.glowOnDark : Self.coreOnLight
+    }
+
+    /// One strand: a few overlapping waves that fade to nothing at both ends. A small
+    /// floor keeps it alive during pauses instead of collapsing to a single flat line.
+    private func strandPath(offset: CGFloat) -> NSBezierPath {
+        let path = NSBezierPath()
+        let middle = bounds.midY
+        let reach = bounds.height / 2 - 1
+        let loudness = 0.1 + level * 0.9
+        for x in stride(from: CGFloat(0), through: bounds.width, by: 1.5) {
+            let along = x / max(bounds.width, 1)
+            let fade = sin(along * .pi)
+            let shift = offset * 1.1
+            let wave = sin(along * 15 + phase + shift) * 0.55
+                + sin(along * 26 - phase * 1.3 + shift * 1.6) * 0.3
+                + sin(along * 7 + phase * 0.6 - shift) * 0.25
+            let point = NSPoint(x: x, y: middle + wave * fade * loudness * reach * (1 - abs(offset) * 0.3))
+            if x == 0 { path.move(to: point) } else { path.line(to: point) }
+        }
+        return path
     }
 }

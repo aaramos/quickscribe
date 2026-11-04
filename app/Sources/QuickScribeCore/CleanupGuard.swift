@@ -13,7 +13,10 @@ public enum CleanupGuard {
         case "polish": return Limits(maxNewWords: 0.34, minLength: 0.4)
         case "concise": return Limits(maxNewWords: 0.5, minLength: 0.25)
         case "active_voice": return Limits(maxNewWords: 0.5, minLength: 0.4)
-        default: return nil   // Rewrite is meant to change the wording.
+        // Rewrite is meant to change the wording, so only output that's nearly all new
+        // words counts as something other than a rewrite, like an obeyed "tell me a joke".
+        case FactoryPrompts.rewriteID: return Limits(maxNewWords: 0.75, minLength: 0.25)
+        default: return nil
         }
     }
 

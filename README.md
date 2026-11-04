@@ -41,9 +41,9 @@ refuses to record and says why.
 4. **Your words always arrive.** If the model refuses, takes too long, is unavailable or
    fails the check, the tidied text is inserted and the overlay says so.
 
-Dictated text never leaves the Mac, and it never goes in the logs. The last 50 dictations
-stay in `~/Library/Application Support/QuickScribe Native/history.json`, readable only by
-your user. Edited prompts are saved beside them in `prompts.json`.
+If nothing that accepts text has focus, the cleaned-up text goes on the clipboard instead
+and the overlay says so. Dictated text never leaves the Mac, never goes in the logs, and isn't saved: there is no
+history. Edited prompts are saved in `~/Library/Application Support/QuickScribe Native/prompts.json`.
 
 ## Build and test
 

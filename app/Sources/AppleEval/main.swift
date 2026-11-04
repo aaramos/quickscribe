@@ -58,6 +58,7 @@ func instructions(_ variant: String) -> (String?, AppleCleaner.Filter) {
     case "polish": return (FactoryPrompts.polish, .permissive)
     case "concise": return (FactoryPrompts.concise, .permissive)
     case "active_voice": return (FactoryPrompts.activeVoice, .permissive)
+    case "rewrite": return (FactoryPrompts.rewrite, .permissive)
     default: fatalError("unknown variant \(variant)")
     }
 }

@@ -7,9 +7,7 @@ import QuickScribeCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let prompts = PromptLibrary(fileURL: AppInfo.dataFolder.appendingPathComponent("prompts.json"))
-    private let history = HistoryStore(fileURL: AppInfo.dataFolder.appendingPathComponent("history.json"))
-    private lazy var session = SessionController(prompts: prompts, history: history)
-    private lazy var historyWindow = HistoryWindow(store: history)
+    private lazy var session = SessionController(prompts: prompts)
     private lazy var settingsWindow = SettingsWindow(library: prompts)
 
     /// Icon A equalizer animation — runs ONLY while recording (t_3db202e7).
@@ -218,10 +216,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let hist = NSMenuItem(title: "History (last 50)", action: #selector(showHistory), keyEquivalent: "")
-        hist.target = self
-        menu.addItem(hist)
-
         let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -246,9 +240,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func showSettings() { settingsWindow.show() }
     @objc private func toggleHandsFree() { session.toggleHandsFree() }
-
-    @objc private func showHistory() {
-        guard let button = statusItem.button else { return }
-        historyWindow.toggle(relativeTo: button)
-    }
 }
