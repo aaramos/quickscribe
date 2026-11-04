@@ -1,4 +1,4 @@
-"""oMLX cleanup client. Profiles: polish | rewrite. Degraded fallback echoes raw.
+"""oMLX cleanup client. The caller supplies the system prompt. Degraded fallback echoes raw.
 
 Keeps oMLX warm with a periodic keepalive completion so the first /polish after
 long idle is not a cold-start (acceptance: >=10min idle -> degraded=false).
@@ -17,18 +17,12 @@ log = logging.getLogger("quickscribe.polish")
 
 _KEY_PATH = pathlib.Path.home() / ".omlx" / "settings.json"
 
-SYSTEM_PROMPTS = {
-    "polish": (
-        "Clean up this dictated text: strip fillers (um, uh, you know), fix obvious "
-        "mishearings, grammar, punctuation, capitalization. Keep the speaker's words. "
-        "Output only the cleaned text."
-    ),
-    "rewrite": (
-        "Rewrite this dictated text as clear prose: tighten wording, well-formed "
-        "sentences, bullets for lists, professional tone. Preserve all information. "
-        "Output only the rewritten text."
-    ),
-}
+# The heavy ⌃⌘⇧ profile. The everyday modes are user-editable: see prompts.py.
+REWRITE_PROMPT = (
+    "Rewrite this dictated text as clear prose: tighten wording, well-formed "
+    "sentences, bullets for lists, professional tone. Preserve all information. "
+    "Output only the rewritten text."
+)
 
 
 def _api_key() -> str:
@@ -175,7 +169,7 @@ class Polisher:
 
     # ---- main operation ---------------------------------------------------------
 
-    async def polish(self, text: str, profile: str) -> tuple[str, bool]:
+    async def polish(self, text: str, system_prompt: str) -> tuple[str, bool]:
         """Returns (text, degraded). degraded=True → polish result unusable
         (LLM down, empty completion, or cut off at max_tokens); raw echoed
         back per contract."""
@@ -185,7 +179,7 @@ class Polisher:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPTS[profile]},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ],
             "temperature": 0.3,

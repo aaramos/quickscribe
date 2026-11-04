@@ -16,6 +16,8 @@ import Foundation
 ///   ⌃⌘ + key < dwell abort the pending start, pass through
 ///                     (⌃⌘F / ⌃⌘Q / ⌃⌘Space behave exactly as before).
 ///   key during        cancel capture with nothing inserted, pass through.
+///   ⌃⌘1 / 2 / 3      pick the refine mode, before or during capture; never
+///                     cancels, and the key still passes through.
 ///   Esc               cancel (handled by the overlay's own monitor).
 final class HotkeyManager {
     /// The single gesture intent the session FSM consumes (main queue).
@@ -23,6 +25,7 @@ final class HotkeyManager {
         case start(rewrite: Bool)
         case stop(rewrite: Bool)
         case cancel
+        case selectMode(index: Int)
     }
 
     var onIntent: ((Intent) -> Void)?
@@ -55,6 +58,14 @@ final class HotkeyManager {
     }
     private static func isRewrite(_ flags: CGEventFlags) -> Bool {
         hasCtrlCmd(flags) && mods(flags).contains(.maskShift)
+    }
+
+    /// ⌃⌘ plus exactly one of the number keys 1, 2, 3 (virtual key codes 18-20),
+    /// with no other modifier, picks that mode.
+    static func modeIndex(keyCode: Int64, flags: CGEventFlags) -> Int? {
+        let exact = CGEventFlags.maskControl.union(.maskCommand)
+        guard mods(flags) == exact, (18...20).contains(keyCode) else { return nil }
+        return Int(keyCode - 18)
     }
 
     // MARK: - Pure state machine (unit-testable; the tap below only adapts it)
@@ -185,6 +196,17 @@ final class HotkeyManager {
             state = next
             emit(intent)
         case .keyDown:
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            if let index = Self.modeIndex(keyCode: keyCode, flags: flags) {
+                // Inside the dwell window this was a shortcut, not a hold: nothing
+                // starts. An already-running capture keeps going.
+                if state == .pending {
+                    dwellTimer?.invalidate(); dwellTimer = nil
+                    state = .idle
+                }
+                emit(.selectMode(index: index))
+                return
+            }
             let (intent, next) = Self.reduce(state: state, type: type, flags: flags)
             if next != .pending { dwellTimer?.invalidate(); dwellTimer = nil }
             state = next

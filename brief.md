@@ -18,9 +18,13 @@ Voice-to-text today forces a choice: raw transcripts that read like speech (fill
    - Collision regression is an acceptance criterion (see AC1).
 2. While speaking, a minimal overlay pill appears: status + live partial transcript so the user knows it's listening and understanding.
 3. On stop, the pipeline (local STT → local LLM cleanup) completes and the polished text is **inserted into the focused app** (clipboard-restore paste technique).
-4. Two cleanup profiles:
-   - **Polish (default):** strip fillers (um/uh/you-know), fix mishearings, fix grammar/punctuation/capitalization, keep the user's voice and word choice.
+4. Cleanup modes (owner PRD "Dictation Polish Modes", 2026-11-03):
+   - **Polish (default):** remove fillers, honor self-corrections, fix punctuation and mishearings, format lists, keep the user's meaning and tone.
+   - **Concise:** the shortest version that still says everything.
+   - **Active Voice:** convert passive to active when the actor is known.
    - **Rewrite (heavy):** restructure into clear sentences, tighten, bullets when the speech was a list, professional tone.
+   - Polish, Concise and Active Voice prompts are editable in Settings, with a reset to factory text and a test sandbox.
+   - Pick a mode from the menu, with ⌃⌘1/2/3, or by starting a dictation with "switch to concise". The choice persists.
    - Profile switchable from the menu-bar menu; quick variant: **hold ⌃⌘⇧** always means Rewrite (replaces the retired ⌥⌘Space variant).
 5. Language: **English only** (STT English-optimized; cleanup prompt English-tuned).
 6. Esc cancels the capture — nothing is inserted, clipboard untouched.
@@ -56,7 +60,7 @@ How this must be achieved (architectural constraints, not suggestions):
 9. Repo builds a renameable .app (bundle id + display name in one config spot). No notarization/updater needed.
 
 ## Out of scope (v1)
-Cloud STT/LLM of any kind · languages other than English · voice commands ("new line" vocab) · speaker diarization · multi-user · sync/export/search of history · plugin system · Windows/Linux · notarized distribution, auto-update, App Store packaging · per-app hotkey profiles · translation.
+Cloud STT/LLM of any kind · languages other than English · voice commands other than switching modes ("new line" vocab) · speaker diarization · multi-user · sync/export/search of history · plugin system · Windows/Linux · notarized distribution, auto-update, App Store packaging · per-app hotkey profiles · translation.
 
 ## Naming
 "QuickScribe" is a working title; renaming must be a one-place change (see runbook packaging note).

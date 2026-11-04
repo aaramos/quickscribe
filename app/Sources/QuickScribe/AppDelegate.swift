@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let session = SessionController()
     private let historyWindow = HistoryWindow()
-    private var profile = "polish"
+    private let settingsWindow = SettingsWindow()
 
     // MARK: Model pickers (polish: t_741dd1a3; transcription: 2026-11-01)
     /// Persisted user choices; nil = sidecar/config default. Both pickers are
@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupModelPickers()
         rebuildMenu()
 
+        session.onProfileChange = { [weak self] in self?.rebuildMenu() }
         session.onPhaseChange = { [weak self] recording in
             guard let self = self else { return }
             if recording {
@@ -224,14 +225,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
-        let polish = NSMenuItem(title: "Polish (default)", action: #selector(selectPolish), keyEquivalent: "")
-        polish.target = self
-        polish.state = profile == "polish" ? .on : .off
-        menu.addItem(polish)
+        for (index, mode) in RefineMode.all.enumerated() {
+            let item = NSMenuItem(title: "\(mode.title)  (\(AppInfo.holdLabel)\(index + 1))",
+                                  action: #selector(selectProfile(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.id
+            item.state = session.defaultProfile == mode.id ? .on : .off
+            menu.addItem(item)
+        }
 
-        let rewrite = NSMenuItem(title: "Rewrite  (or hold \(AppInfo.holdRewriteLabel))", action: #selector(selectRewrite), keyEquivalent: "")
+        let rewrite = NSMenuItem(title: "Rewrite  (or hold \(AppInfo.holdRewriteLabel))",
+                                 action: #selector(selectProfile(_:)), keyEquivalent: "")
         rewrite.target = self
-        rewrite.state = profile == "rewrite" ? .on : .off
+        rewrite.representedObject = RefineMode.rewriteProfile
+        rewrite.state = session.defaultProfile == RefineMode.rewriteProfile ? .on : .off
         menu.addItem(rewrite)
 
         menu.addItem(.separator())
@@ -242,6 +249,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hist = NSMenuItem(title: "History (last 50)", action: #selector(showHistory), keyEquivalent: "")
         hist.target = self
         menu.addItem(hist)
+
+        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
 
         menu.addItem(.separator())
 
@@ -257,8 +268,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func selectPolish() { profile = "polish"; session.defaultProfile = "polish"; rebuildMenu() }
-    @objc private func selectRewrite() { profile = "rewrite"; session.defaultProfile = "rewrite"; rebuildMenu() }
+    @objc private func selectProfile(_ sender: NSMenuItem) {
+        guard let profile = sender.representedObject as? String else { return }
+        session.selectProfile(profile)
+    }
+    @objc private func showSettings() { settingsWindow.show() }
     @objc private func toggleHandsFree() { session.toggleHandsFree() }
 
     // MARK: - Model pickers wiring (polish: t_741dd1a3; transcription: 2026-11-01)

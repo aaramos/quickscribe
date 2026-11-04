@@ -12,11 +12,15 @@ final class SessionController {
     enum Mode { case idle, pushToTalk, toggled }
 
     private(set) var mode: Mode = .idle
-    private var rewriteProfile = false
-    var profile: String { rewriteProfile ? "rewrite" : "polish" }
-    /// Menu-selected default profile ("polish" | "rewrite"); the
-    /// ⌃⌘⇧ hold overrides per-session (brief §4).
-    var defaultProfile = "polish"
+    /// ⌃⌘⇧ hold: Rewrite for this session only (brief §4).
+    private var forcedRewrite = false
+    var profile: String { forcedRewrite ? RefineMode.rewriteProfile : defaultProfile }
+    /// The chosen default profile, kept across launches. Read when polish
+    /// starts, so a mode picked mid-dictation applies to that dictation.
+    private(set) var defaultProfile = RefineMode.savedProfile()
+    /// A mode was picked during this capture, so an empty result is not a failure.
+    private var modePickedThisSession = false
+    var onProfileChange: (() -> Void)?
 
     private let capture = AudioCapture()
     private let overlay = OverlayController()
@@ -94,7 +98,27 @@ final class SessionController {
             // (hands-free) mode ordinary typing must NOT kill the session.
             guard mode == .pushToTalk else { return }
             cancel()
+        case .selectMode(let index):
+            guard RefineMode.all.indices.contains(index) else { return }
+            selectProfile(RefineMode.all[index].id)
         }
+    }
+
+    /// Every way of picking a mode ends here: menu, shortcut, voice.
+    func selectProfile(_ profile: String) {
+        defaultProfile = profile
+        forcedRewrite = false
+        RefineMode.saveProfile(profile)
+        onProfileChange?()
+        if mode == .idle {
+            announceProfile()
+        } else {
+            modePickedThisSession = true
+        }
+    }
+
+    private func announceProfile() {
+        overlay.show(.modeChanged(RefineMode.title(forProfile: defaultProfile)), autoHideAfter: 1.5)
     }
 
     /// Menu-bar hands-free toggle: "Start/Stop Recording (hands-free)".
@@ -114,7 +138,8 @@ final class SessionController {
     private func start(rewrite: Bool) {
         // Fresh generation invalidates any stragglers from a prior session.
         generation += 1
-        rewriteProfile = rewrite || defaultProfile == "rewrite"
+        forcedRewrite = rewrite
+        modePickedThisSession = false
         partialText = ""
         partialInFlight = false
         pendingChunks.removeAll()
@@ -257,6 +282,10 @@ final class SessionController {
             // We no longer hold full audio (streamed incrementally). If a chunk
             // failed AND no partial arrived, insert nothing (brief §7: empty → nothing).
             if raw.isEmpty {
+                if modePickedThisSession {
+                    announceProfile()
+                    return
+                }
                 // Honest silence path (t_b3e7802c): if EVERY chunk that left the
                 // app was below the RMS floor (or nothing was emitted at all),
                 // the mic heard nothing — say so, name the device, insert nothing.
@@ -281,6 +310,14 @@ final class SessionController {
             // Partial data exists despite a failed chunk — proceed with what we have,
             // logged as degraded capture.
             NSLog("QuickScribe: \(chunkFails) stream chunk(s) failed; assembling from \(raw.count) chars of partials")
+        }
+        if let command = VoiceModeCommand.parse(raw) {
+            selectProfile(command.modeID)
+            guard !command.remainder.isEmpty else {
+                announceProfile()
+                return
+            }
+            raw = command.remainder
         }
         polishAndInsert(raw: raw)
     }

@@ -19,6 +19,7 @@ final class OverlayController {
         case inserted
         case degraded        // polish unusable (down OR blank completion) — raw inserted (brief §8)
         case cancelled
+        case modeChanged(String)
         case error(String)
 
         var label: String {
@@ -30,6 +31,7 @@ final class OverlayController {
             case .inserted: return "✓ Inserted"
             case .degraded: return "! Polish unavailable — inserted raw text"
             case .cancelled: return "✕ Cancelled"
+            case .modeChanged(let name): return "✓ Mode: \(name)"
             case .error(let m): return "! " + m
             }
         }
@@ -53,7 +55,7 @@ final class OverlayController {
             switch self {
             case .recording, .partial: return .systemRed
             case .processing: return .systemYellow
-            case .inserted: return .systemGreen
+            case .inserted, .modeChanged: return .systemGreen
             case .degraded: return .systemOrange
             case .cancelled, .error: return .systemGray
             case .hidden: return .clear

@@ -13,7 +13,8 @@ Read this before touching anything. Decisions here are settled — do not re-lit
 sidecar/            # backend lane
   server.py         # FastAPI app
   stt.py            # Whisper-class engine wrapper (speculative/chunked transcription)
-  polish.py         # oMLX cleanup client (profiles: polish|rewrite)
+  polish.py         # oMLX cleanup client
+  prompts.py        # refine-mode prompts: factory text + user overrides
   history.py        # sqlite: last 50 captures
   benchmark.py      # TTI harness (synthetic wav fixtures -> timings)
   fixtures/         # test audio (10s / 30s / 60s utterances)
@@ -35,13 +36,19 @@ File naming: snake_case python, standard Swift conventions. No spaces in filenam
 GET  /health            -> {"status":"ok","stt_ready":bool,"llm_ready":bool}
 POST /transcribe        # multipart: file=<wav 16k mono int16>; query: partial=true for in-flight chunks
                         -> {"text": "...", "language":"en"}
-POST /polish            # json: {"text":"...","profile":"polish"|"rewrite"}
+POST /polish            # json: {"text":"...","profile":"polish"|"concise"|"active_voice"|"rewrite"}
                         -> {"text":"...", "degraded":false}
                         # degraded=true means the polish result is unusable or
                         # unavailable (LLM down, a completion with no content,
                         # or one cut off at max_tokens)
                         # and the raw text is echoed back; the app retries once,
                         # only while its TTI budget lasts, then inserts raw
+GET  /prompts           -> {"modes":[{"id","label","prompt","factory","custom"},...],"max_tokens":2000}
+PUT  /prompts/{mode}    # json: {"prompt":"..."}; used from the next /polish on
+                        -> the mode's entry; 422 {"detail":"reason"} if empty or over the limit
+DELETE /prompts/{mode}  # back to the factory text -> the mode's entry
+POST /prompts/test      # json: {"text":"...","prompt":"..."}; runs a draft, saves nothing
+                        -> {"text":"...","degraded":bool,"ms":int}
 GET  /stt/models        -> {"models":["repo-id",...], "current":"active-repo-id"}
 POST /stt/models        # json: {"model":"repo-id"}; candidate is warm-loaded
                         # (download included) BEFORE committing
@@ -80,7 +87,7 @@ All JSON, UTF-8. No auth (localhost bind 127.0.0.1 only).
 ## Do NOT (load-bearing)
 - Do NOT add cloud endpoints, telemetry, analytics, or "phone home" of any kind. Localhost + oMLX only.
 - Do NOT invent voice commands ("new paragraph" etc.) — out of scope v1.
-- Do NOT build an editor UI, settings window zoo, or preferences beyond: hotkey config (one screen max), profile choice.
+- Do NOT build an editor UI, settings window zoo, or preferences beyond: hotkey config (one screen max), profile choice, and the one-screen Refine Prompts settings (owner PRD 2026-11-03).
 - Do NOT pin/rename models in app code (frontend never references model names at all; sidecar reads from its own config).
 - Do NOT run package managers inside /workspace/App/* mounts (host live apps) — this project lives in ~/Projects, use venvs for python deps.
 - Do NOT restructure the layout above or rename top-level dirs.

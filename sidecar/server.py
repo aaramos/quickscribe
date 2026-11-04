@@ -23,7 +23,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from history import History
-from polish import Polisher
+from polish import REWRITE_PROMPT, Polisher
+from prompts import MAX_PROMPT_TOKENS, MODE_LABELS, PromptError, PromptStore, validate_prompt
 from stt import STTEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -56,6 +57,7 @@ history = History(
     db_path=Path(os.path.expanduser(CFG["history"]["db_path"])),
     limit=CFG["history"].get("limit", 50),
 )
+prompts = PromptStore(Path(os.path.expanduser(CFG["prompts"]["path"])))
 
 
 @asynccontextmanager
@@ -82,6 +84,15 @@ app = FastAPI(title="QuickScribe sidecar", lifespan=lifespan)
 class PolishBody(BaseModel):
     text: str
     profile: str = "polish"
+
+
+class PromptBody(BaseModel):
+    prompt: str
+
+
+class PromptTestBody(BaseModel):
+    text: str
+    prompt: str
 
 
 class CaptureBody(BaseModel):
@@ -167,15 +178,60 @@ async def transcribe(
     return JSONResponse({"text": text, "language": stt_engine.language, "ms": ms})
 
 
+def _system_prompt(profile: str) -> str:
+    if profile == "rewrite":
+        return REWRITE_PROMPT
+    if profile in MODE_LABELS:
+        return prompts.prompt(profile)
+    raise HTTPException(status_code=400, detail=f"unknown profile: {profile}")
+
+
 @app.post("/polish")
 async def polish(body: PolishBody):
-    if body.profile not in ("polish", "rewrite"):
-        raise HTTPException(status_code=400, detail="profile must be 'polish' or 'rewrite'")
+    system_prompt = _system_prompt(body.profile)
     t0 = time.perf_counter()
-    text, degraded = await polisher.polish(body.text, body.profile)
+    text, degraded = await polisher.polish(body.text, system_prompt)
     ms = int((time.perf_counter() - t0) * 1000)
     log.info("polish profile=%s degraded=%s ms=%s", body.profile, degraded, ms)
     return JSONResponse({"text": text, "degraded": degraded, "ms": ms})
+
+
+def _require_mode(mode: str) -> None:
+    if mode not in MODE_LABELS:
+        raise HTTPException(status_code=404, detail=f"unknown mode: {mode}")
+
+
+@app.get("/prompts")
+async def list_prompts():
+    return JSONResponse({"modes": prompts.entries(), "max_tokens": MAX_PROMPT_TOKENS})
+
+
+@app.post("/prompts/test")
+async def test_prompt(body: PromptTestBody):
+    """Run a draft prompt on sample text without saving it."""
+    try:
+        validate_prompt(body.prompt)
+    except PromptError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    t0 = time.perf_counter()
+    text, degraded = await polisher.polish(body.text, body.prompt)
+    return JSONResponse({"text": text, "degraded": degraded,
+                         "ms": int((time.perf_counter() - t0) * 1000)})
+
+
+@app.put("/prompts/{mode}")
+async def save_prompt(mode: str, body: PromptBody):
+    _require_mode(mode)
+    try:
+        return JSONResponse(prompts.save(mode, body.prompt))
+    except PromptError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/prompts/{mode}")
+async def reset_prompt(mode: str):
+    _require_mode(mode)
+    return JSONResponse(prompts.reset(mode))
 
 
 @app.post("/capture")

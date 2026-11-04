@@ -57,3 +57,7 @@ port = 8790
 [history]
 db_path = "~/Library/QuickScribe/history.sqlite3"
 limit = 50
+
+[prompts]
+# The user's edited refine-mode prompts. Factory text ships in prompts.py.
+path = "~/Library/QuickScribe/prompts.json"

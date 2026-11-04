@@ -59,7 +59,8 @@ A 🎙︎ icon appears in the menu bar. That's the whole UI. (Sidecar down? The 
 |---|---|
 | **Hold ⌃⌘** | Push-to-talk: capture starts after a brief dwell (no key pressed during it); release either modifier to finish |
 | **Hold ⌃⌘⇧** | Same gesture, forced **Rewrite** profile |
-| **⌃⌘ + any key** | Passes through untouched — ⌃⌘F, ⌃⌘Q, ⌃⌘Space work exactly as before; a key press during capture cancels it (nothing inserted) |
+| **⌃⌘1 / ⌃⌘2 / ⌃⌘3** | Pick Polish, Concise or Active Voice, before or during a dictation |
+| **⌃⌘ + any other key** | Passes through untouched — ⌃⌘F, ⌃⌘Q, ⌃⌘Space work exactly as before; a key press during capture cancels it (nothing inserted) |
 | **Esc** | Cancel — nothing is inserted, clipboard untouched |
 | **Menu bar → Start Recording (hands-free)** | Hands-free toggle: record until you click Stop |
 
@@ -69,8 +70,14 @@ Modifier-only hold (owner UX change 2026-09-18 — the old ⌘⌥Space binding c
 
 Choose from the menu-bar menu (switchable without relaunch):
 
-- **Polish** (default) — strip fillers ("um", "you know"), fix mishearings, grammar, punctuation, capitalization. Keeps your voice and word choice.
+- **Polish** (default) — removes fillers, honors self-corrections ("at 2, actually 3" becomes "at 3"), fixes punctuation and mishearings, formats lists. Keeps your meaning and tone.
+- **Concise** — the shortest version that still says everything.
+- **Active Voice** — turns passive sentences active when the actor is known.
 - **Rewrite** — tighten into clear sentences, bullets for lists, professional tone. Preserves all information.
+
+Your choice is remembered. You can also pick a mode with ⌃⌘1/2/3, or by starting a dictation with "switch to concise" (alone, or followed by a period and the text to dictate).
+
+**Menu bar → Settings…** shows the prompt behind Polish, Concise and Active Voice. Edit and save to change the very next dictation, reset to get the factory text back, or try a draft on sample dictation without saving. Your edits are stored in `~/Library/QuickScribe/prompts.json`, separate from the factory text, so updates never overwrite them.
 
 If the polish step comes back unusable (LLM down, or a completion with no content), QuickScribe retries once and then inserts the **raw transcript** rather than making you wait — the overlay says `! Polish unavailable — inserted raw text`.
 
@@ -111,5 +118,6 @@ quickscribe/
 
 ```bash
 cd quickscribe/sidecar
+.venv/bin/python -m unittest discover -s tests -t .   # sidecar tests
 .venv/bin/python benchmark.py     # runs synthetic 10/30/60s fixtures, rewrites docs/benchmark.md
 ```

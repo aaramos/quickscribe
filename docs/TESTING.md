@@ -99,3 +99,25 @@ separate tracked concern, do not silence it.
 ## Owner hand test (final acceptance)
 Hold Control+Command in any focused app → overlay pill appears within
 ~100 ms → speak → release → text inserts exactly once.
+
+## Refine modes and Settings proof (owner PRD, 2026-11-03)
+
+Sidecar tests (factory text, overrides, routes, raw fallback):
+  cd sidecar && .venv/bin/python -m unittest discover -s tests -t .
+
+Settings proof: opens the real Settings window and drives it against the
+RUNNING sidecar, so it briefly saves a test prompt on Concise (removed again on
+pass and on failure). Do not dictate in Concise while it runs.
+build:
+  S=Sources/QuickScribe
+  swiftc -O -o build/proofs/settings-proof $S/AppInfo.swift $S/RefineMode.swift \
+    $S/SidecarClient.swift $S/SettingsWindow.swift proof-src/settings/main.swift -framework AppKit
+run:
+  build/proofs/settings-proof <folder for screenshots>
+PASS criteria: every line "ok" and a final "PASS"; the screenshots show the
+window laid out correctly.
+
+Not covered by automation: real key routing for Command-V and friends in the
+editor, and a mode change spoken into a real microphone. VoiceModeCommand and
+the HotkeyManager chord are unit-tested; the shell here has no permission to
+post system key events.

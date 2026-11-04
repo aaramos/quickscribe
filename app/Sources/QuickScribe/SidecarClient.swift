@@ -16,6 +16,16 @@ final class SidecarClient {
     struct Health: Decodable { let status: String; let stt_ready: Bool; let llm_ready: Bool; var model: String? }
     struct Transcript: Decodable { let text: String; let language: String; var ms: Int? }
     struct Polished: Decodable { let text: String; let degraded: Bool }
+    struct PromptEntry: Decodable, Equatable {
+        let id: String
+        let label: String
+        let prompt: String
+        let factory: String
+        let custom: Bool
+    }
+    struct PromptList: Decodable { let modes: [PromptEntry]; let max_tokens: Int }
+    private struct PromptTestResult: Decodable { let text: String; let degraded: Bool }
+    private struct Problem: Decodable { let detail: String }
     struct CaptureEntry: Decodable { let raw: String; let polished: String; let profile: String; let ts: Double }
     struct ModelList: Decodable { let models: [String]; let current: String }
     struct ModelSwitch: Decodable { let ok: Bool; let model: String }
@@ -114,6 +124,62 @@ final class SidecarClient {
                 completion(false, nil); return
             }
             completion(s.ok, s.model)
+        }.resume()
+    }
+
+    /// GET /prompts — each mode's current and factory prompt.
+    func listPrompts(completion: @escaping (PromptList?) -> Void) {
+        get("/prompts", timeout: 3) { (data: Data?) in
+            completion(data.flatMap { try? JSONDecoder().decode(PromptList.self, from: $0) })
+        }
+    }
+
+    /// PUT /prompts/{mode}. Completion: (saved entry, or the sidecar's reason for refusing).
+    func savePrompt(mode: String, text: String, completion: @escaping (PromptEntry?, String?) -> Void) {
+        sendPrompt(method: "PUT", mode: mode, body: ["prompt": text], completion: completion)
+    }
+
+    /// DELETE /prompts/{mode} — back to the factory prompt.
+    func resetPrompt(mode: String, completion: @escaping (PromptEntry?, String?) -> Void) {
+        sendPrompt(method: "DELETE", mode: mode, body: nil, completion: completion)
+    }
+
+    private func sendPrompt(method: String, mode: String, body: [String: String]?,
+                            completion: @escaping (PromptEntry?, String?) -> Void) {
+        guard let url = URL(string: "\(AppInfo.sidecarBase)/prompts/\(mode)") else { completion(nil, nil); return }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 5
+        if let body = body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        session.dataTask(with: req) { data, _, _ in
+            guard let data = data else { completion(nil, nil); return }
+            if let entry = try? JSONDecoder().decode(PromptEntry.self, from: data) {
+                completion(entry, nil)
+            } else {
+                completion(nil, (try? JSONDecoder().decode(Problem.self, from: data))?.detail)
+            }
+        }.resume()
+    }
+
+    /// POST /prompts/test — run a draft on sample text without saving it.
+    /// Completion: (output, degraded, the sidecar's reason for refusing).
+    func testPrompt(text: String, prompt: String, completion: @escaping (String?, Bool, String?) -> Void) {
+        guard let url = URL(string: "\(AppInfo.sidecarBase)/prompts/test") else { completion(nil, false, nil); return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["text": text, "prompt": prompt])
+        session.dataTask(with: req) { data, _, _ in
+            guard let data = data else { completion(nil, false, nil); return }
+            if let result = try? JSONDecoder().decode(PromptTestResult.self, from: data) {
+                completion(result.text, result.degraded, nil)
+            } else {
+                completion(nil, false, (try? JSONDecoder().decode(Problem.self, from: data))?.detail)
+            }
         }.resume()
     }
 
