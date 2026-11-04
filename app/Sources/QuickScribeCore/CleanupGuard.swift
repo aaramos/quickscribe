@@ -11,18 +11,19 @@ public enum CleanupGuard {
         let minLength: Double
         var maxGrowth = 1.5
         var extraWords = 8.0
+        var maxNewInSentence = 0.5
     }
 
     private static func limits(_ mode: String) -> Limits? {
         switch mode {
         case "polish": return Limits(maxNewWords: 0.34, minLength: 0.4)
-        case "concise": return Limits(maxNewWords: 0.5, minLength: 0.25)
+        case "concise": return Limits(maxNewWords: 0.5, minLength: 0.25, maxNewInSentence: 0.75)
         case "active_voice": return Limits(maxNewWords: 0.5, minLength: 0.4)
         // Rewrite is meant to change the wording, so only output that's nearly all new
         // words counts as something other than a rewrite, like an obeyed "tell me a joke".
         // It's meant to tighten too, so it can't grow much: that catches a joke or an
         // invented summary with the speaker's own words stuck on the front.
-        case FactoryPrompts.rewriteID: return Limits(maxNewWords: 0.75, minLength: 0.25, maxGrowth: 1.2, extraWords: 4)
+        case FactoryPrompts.rewriteID: return Limits(maxNewWords: 0.75, minLength: 0.25, maxGrowth: 1.2, extraWords: 4, maxNewInSentence: 0.85)
         default: return nil
         }
     }
@@ -41,7 +42,19 @@ public enum CleanupGuard {
         let known = Set(given)
         let new = produced.filter { !known.contains($0) }
         if !produced.isEmpty, Double(new.count) / Double(produced.count) > limits.maxNewWords { return false }
+        if addsASentence(output: output, known: known, limit: limits.maxNewInSentence) { return false }
         return !addsAName(output: output, known: known)
+    }
+
+    /// The whole-text limits can't see one invented sentence in a long dictation, like
+    /// the "I am a foundation model developed by Apple." the model sometimes puts first,
+    /// so each sentence is also judged alone. Very short ones are too easy to trip.
+    private static func addsASentence(output: String, known: Set<String>, limit: Double) -> Bool {
+        output.split(whereSeparator: { ".!?\n".contains($0) }).contains { sentence in
+            let spoken = words(String(sentence)).filter(isNotNumber)
+            guard spoken.count >= 4 else { return false }
+            return Double(spoken.filter { !known.contains($0) }.count) / Double(spoken.count) > limit
+        }
     }
 
     private static func isNotNumber(_ word: String) -> Bool {

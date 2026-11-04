@@ -125,6 +125,27 @@ final class CleanupGuardTests: XCTestCase {
     }
 }
 
+final class CleanupGuardAddedSentenceTests: XCTestCase {
+    private let dictation = "For the Apple native implementation of QuickScribe, can you create an installer? Post it to GitHub so people can download and use it."
+
+    func testAnInventedSelfIntroductionIsCaughtInALongDictation() {
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "I am a foundation model developed by Apple. " + dictation, input: dictation, mode: "polish"))
+    }
+    func testItIsCaughtWhenTheDictationSharesSomeOfItsWords() {
+        let input = "Is this the Apple version of the app? I want to know which model it is using."
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "I am a foundation model developed by Apple. " + input, input: input, mode: "polish"))
+    }
+    func testTheDictationItselfStillPasses() {
+        XCTAssertTrue(CleanupGuard.accepts(output: dictation, input: dictation, mode: "polish"))
+    }
+    func testTheSpeakerCanSayItThemselves() {
+        let input = "The press release says I am a foundation model developed by Apple, which is odd."
+        XCTAssertTrue(CleanupGuard.accepts(output: input, input: input, mode: "polish"))
+    }
+}
+
 final class CleanupGuardQuestionTests: XCTestCase {
     func testAQuestionThatBecameAStatementWasAnswered() {
         XCTAssertFalse(CleanupGuard.accepts(output: "France won the World Cup in 2018.",
