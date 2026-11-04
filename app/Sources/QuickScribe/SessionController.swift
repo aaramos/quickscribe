@@ -265,6 +265,14 @@ final class SessionController {
                     overlay.show(.error("Couldn't hear you — check your mic\(dev)"), autoHideAfter: 3.0)
                 } else if repeatSuppressed && partialText.isEmpty {
                     overlay.show(.error("Couldn't hear you — check your mic"), autoHideAfter: 3.0)
+                } else if chunkFails > 0 {
+                    // Audio reached the service but transcribe requests FAILED
+                    // (500/timeout/refused) — the honest cause is the STT
+                    // service, not the mic. (2026-11-03: unmounted cache
+                    // volume 500'd every chunk and the user got the
+                    // misleading "Nothing captured".)
+                    overlay.show(.error("Transcription unavailable — check the sidecar"), autoHideAfter: 3.0)
+                    NSLog("QuickScribe: \(chunkFails) transcribe request(s) failed; no text assembled")
                 } else {
                     overlay.show(.error("Nothing captured"), autoHideAfter: 1.5)
                 }
