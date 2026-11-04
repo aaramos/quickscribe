@@ -66,15 +66,9 @@ enum AudioPreflight {
     }
 }
 
-/// AVAudioEngine capture -> 16 kHz mono int16, flushed as WAV chunks
-/// every AppInfo.chunkSeconds to the onChunk callback (runbook topology:
-/// the APP owns capture + streaming; the sidecar owns models).
-///
-/// Silence gate (t_b3e7802c): each flush-chunk's RMS is computed before it
-/// leaves the app. Chunks below AppInfo.silenceRmsFloor are NOT emitted —
-/// silent audio never reaches Whisper, so the "Thank you." hallucination loop
-/// cannot be born. The session tracks voiced vs silent chunk counts so a
-/// fully-silent session reports honestly instead of inserting garbage.
+/// AVAudioEngine capture. Each buffer goes straight to the recognizer, and its level
+/// is measured along the way so a session the mic never really heard can say so
+/// instead of inserting whatever the recognizer made of the noise.
 final class AudioCapture {
     /// NOT a `let`: AVAudioEngine binds its input device the first time the
     /// node graph is touched and never re-reads the system default (proven
@@ -84,13 +78,10 @@ final class AudioCapture {
     /// "new mic ignored until app restart" defect — `invalidateEngine()`
     /// swaps in a fresh instance on device changes while idle.
     private var engine = AVAudioEngine()
-    private var converter: AVAudioConverter?
-    private let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                              sampleRate: 16000, channels: 1, interleaved: true)!
-    private var pending = Data()           // not-yet-flushed int16 LE samples
-    private var totalSamples: Int64 = 0
-    private var flushSamples: Int64 = 0   // samples accumulated since last flush
-    private var flushEnergy: Double = 0   // sum of x² since last flush
+    private var capturedSeconds: Double = 0
+    private var windowSeconds: Double = 0
+    private var windowEnergy: Double = 0
+    private var windowSamples: Int64 = 0
     private(set) var isCapturing = false
 
     /// Active capture device (resolved at start, shown in the overlay pill).
@@ -101,15 +92,13 @@ final class AudioCapture {
     private(set) var liveTapFormat: AVAudioFormat?
     /// Scoped default-input switch owned by the capture window (t_b3e7802c).
     private var bind: InputDeviceResolver.Bind?
-    /// Chunk accounting for the honest "Couldn't hear you" path.
-    private(set) var voicedChunks = 0
-    private(set) var silentChunks = 0
-    private(set) var lastChunkRms: Double = 0
+    /// Window accounting for the honest "Couldn't hear you" path.
+    private(set) var voicedWindows = 0
+    private(set) var silentWindows = 0
 
-    /// Invoked on a background queue with a complete WAV file's bytes.
-    /// `voiced` = chunk RMS at/above the silence floor (only voiced chunks
-    /// are ever emitted; the flag stays in the signature for the harness).
-    var onChunk: ((_ wav: Data, _ secs: Double, _ voiced: Bool) -> Void)?
+    /// Invoked on the audio thread with each captured buffer. The buffer is only
+    /// valid during the call.
+    var onBuffer: ((AVAudioPCMBuffer) -> Void)?
 
     /// LEVEL TAP (t_3db202e7): invoked on a background queue with the live
     /// input level 0...1 for every capture buffer, ~1 frame per 16 ms so a
@@ -122,18 +111,21 @@ final class AudioCapture {
 
     struct CaptureError: Error { let why: String }
 
-    private let flushQueue = DispatchQueue(label: "quickscribe.flush")
+    private let accountingQueue = DispatchQueue(label: "quickscribe.capture-accounting")
 
-    var sessionWasFullySilent: Bool { silentChunks > 0 && voicedChunks == 0 }
+    var sessionWasFullySilent: Bool { accountingQueue.sync { voicedWindows == 0 } }
 
     func start() throws {
         guard !isCapturing else { return }
         // Defensive: a previous failed start must never leave a bind dangling —
         // stop() early-returns while !isCapturing, so nothing else restores it.
         if let b = bind { InputDeviceResolver.restore(b); bind = nil }
-        voicedChunks = 0
-        silentChunks = 0
-        lastChunkRms = 0
+        voicedWindows = 0
+        silentWindows = 0
+        capturedSeconds = 0
+        windowSeconds = 0
+        windowEnergy = 0
+        windowSamples = 0
         peakLevel = 0
         lastLevelEmit = 0
         let inputFormat: AVAudioFormat
@@ -144,17 +136,12 @@ final class AudioCapture {
             // permission prompt lands (onboarding owns the prompt).
             do { inputFormat = try startEngine() } catch { throw CaptureError(why: "mic unavailable: \(error.localizedDescription)") }
         }
-        converter = AVAudioConverter(from: inputFormat, to: outputFormat)
-        pending.removeAll(keepingCapacity: true)
-        totalSamples = 0
-        flushSamples = 0
-        flushEnergy = 0
         // installTap throws NSException on format mismatch — must be inside
         // the exception bridge (t_50da3b54) or AppKit swallows it as a
         // silent no-op.
         if let exc = ExceptionGuard.run({ [engine, inputFormat] in
             engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buf, _ in
-                self?.convert(buf)
+                self?.handle(buf)
             }
         }) {
             engine.stop()
@@ -235,7 +222,6 @@ final class AudioCapture {
             // resolver choice. We are idle by construction here, the same
             // precondition invalidateEngine asserts.
             engine = AVAudioEngine()
-            converter = nil
             throw error
         }
     }
@@ -248,128 +234,57 @@ final class AudioCapture {
     func invalidateEngine() {
         guard !isCapturing else { return }
         engine = AVAudioEngine()
-        converter = nil
         activeDevice = nil
         liveTapFormat = nil
     }
 
+    /// Returns how many seconds were captured. A last partial window still counts,
+    /// so a very short dictation isn't mistaken for silence.
     func stop() -> Double {
         guard isCapturing else { return 0 }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isCapturing = false
         if let b = bind { InputDeviceResolver.restore(b); bind = nil }
-        return Double(totalSamples) / 16000.0
-    }
-
-    /// Flush any buffered audio (< chunk boundary) as the final "tail" WAV.
-    /// Called from finish() after stop() — the PCM already sits in `pending`,
-    /// so engine teardown does not affect it. Still RMS-gated: a silent tail
-    /// is never emitted (t_b3e7802c).
-    func flushTail() {
-        guard flushSamples > 0 else { return }
-        emitChunk()
-    }
-
-    private func convert(_ buffer: AVAudioPCMBuffer) {
-        guard let converter = converter else { return }
-        let capacity: AVAudioFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * 16000.0 / converter.inputFormat.sampleRate) + 64
-        guard let out = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return }
-        var consumed = false
-        let status = converter.convert(to: out, error: nil) { _, outStatus in
-            if consumed { outStatus.pointee = .noDataNow; return nil }
-            consumed = true
-            outStatus.pointee = .haveData
-            return buffer
+        return accountingQueue.sync {
+            closeWindow()
+            return capturedSeconds
         }
-        guard status != .error, out.frameLength > 0, let ch = out.int16ChannelData else { return }
-        let bytes = Data(bytes: ch[0], count: Int(out.frameLength) * 2)
-        // Sum of squares over this buffer's int16 samples (in normalized
-        // units) — accumulated per chunk so chunk RMS is exact, not sampled.
-        let samples = UnsafeBufferPointer(start: ch[0], count: Int(out.frameLength))
+    }
+
+    private func handle(_ buffer: AVAudioPCMBuffer) {
+        guard let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        let count = Int(buffer.frameLength)
         var energy: Double = 0
-        for s in samples { let v = Double(s) / 32768.0; energy += v * v }
-        // LEVEL TAP: per-buffer RMS → 0...1 level, throttled to ~60 fps.
-        if let onLevel = onLevel, out.frameLength > 0 {
-            let lvl = min(1.0, (energy / Double(out.frameLength)).squareRoot() * 6.0)
-            if lvl > peakLevel { peakLevel = lvl }
+        for i in 0..<count { let v = Double(channel[i]); energy += v * v }
+        let rms = (energy / Double(count)).squareRoot()
+        if let onLevel {
+            let level = min(1.0, rms * 6.0)
+            if level > peakLevel { peakLevel = level }
             let now = CACurrentMediaTime()
             if now - lastLevelEmit >= 0.015 {
                 lastLevelEmit = now
-                onLevel(lvl)
+                onLevel(level)
             }
         }
-        flushQueue.sync {
-            pending.append(bytes)
-            totalSamples += Int64(out.frameLength)
-            flushSamples += Int64(out.frameLength)
-            flushEnergy += energy
-            if flushSamples >= Int64(16000 * AppInfo.chunkSeconds) {
-                emitChunkLocked()
-            }
+        let seconds = Double(count) / buffer.format.sampleRate
+        accountingQueue.sync {
+            capturedSeconds += seconds
+            windowSeconds += seconds
+            windowEnergy += energy
+            windowSamples += Int64(count)
+            if windowSeconds >= AppInfo.silenceWindowSeconds { closeWindow() }
         }
+        onBuffer?(buffer)
     }
 
-    private func emitChunk() {
-        flushQueue.sync { emitChunkLocked() }
-    }
-
-    /// Caller holds flushQueue. Non-overlapping chunks: whatever is buffered
-    /// goes out and the buffer resets — partials concatenate verbatim.
-    /// SILENCE GATE: chunks whose RMS is below the floor are counted and
-    /// dropped; they are never sent to the decoder.
-    private func emitChunkLocked() {
-        guard flushSamples > 0 else { return }
-        let rms = (flushEnergy / Double(flushSamples)).squareRoot()
-        let secs = Double(flushSamples) / 16000.0
-        flushSamples = 0
-        flushEnergy = 0
-        lastChunkRms = rms
-        if rms < AppInfo.silenceRmsFloor {
-            silentChunks += 1
-            NSLog(String(format: "QuickScribe: chunk %.1fs rms=%.5f BELOW floor %.4f — gated (no decode)",
-                         secs, rms, AppInfo.silenceRmsFloor))
-            return
-        }
-        voicedChunks += 1
-        let wav = WavWriter.wav(int16LE: pending, sampleRate: 16000)
-        pending.removeAll(keepingCapacity: true)
-        onChunk?(wav, secs, true)
-    }
-
-}
-
-enum WavWriter {
-    /// Exact byte size of the header written below (44) — callers merging
-    /// WAV payloads (SessionController.takePendingChunks) drop this prefix to
-    /// get at the raw int16 PCM. Keep in sync with `wav(int16LE:sampleRate:)`.
-    static let headerSize = 44
-
-    /// Minimal RIFF/WAVE writer: 16-bit PCM mono.
-    static func wav(int16LE data: Data, sampleRate: UInt32) -> Data {
-        var out = Data()
-        let dataLen = UInt32(data.count)
-        out.append(contentsOf: "RIFF".utf8)
-        out.append(le(36 + dataLen))
-        out.append(contentsOf: "WAVE".utf8)
-        out.append(contentsOf: "fmt ".utf8)
-        out.append(le(16))                       // fmt chunk size
-        out.append(le16(1))                     // PCM
-        out.append(le16(1))                     // mono
-        out.append(le(sampleRate))
-        out.append(le(sampleRate * 2))         // byte rate
-        out.append(le16(2))                     // block align
-        out.append(le16(16))                    // bits
-        out.append(contentsOf: "data".utf8)
-        out.append(le(dataLen))
-        out.append(data)
-        return out
-    }
-
-    private static func le(_ v: UInt32) -> Data {
-        var v = v.littleEndian; return Data(bytes: &v, count: 4)
-    }
-    private static func le16(_ v: UInt16) -> Data {
-        var v = v.littleEndian; return Data(bytes: &v, count: 2)
+    /// Caller holds accountingQueue.
+    private func closeWindow() {
+        guard windowSamples > 0 else { return }
+        let rms = (windowEnergy / Double(windowSamples)).squareRoot()
+        if rms < AppInfo.silenceRmsFloor { silentWindows += 1 } else { voicedWindows += 1 }
+        windowSeconds = 0
+        windowEnergy = 0
+        windowSamples = 0
     }
 }

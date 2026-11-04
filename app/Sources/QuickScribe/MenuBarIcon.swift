@@ -47,8 +47,8 @@ enum MenuBarIcon {
         }
         img.isTemplate = !dimmed
         if dimmed {
-            // Sidecar-down: keep the A glyph, just dim it (card allows
-            // "restyle as dimmed A"; alpha is baked, template off).
+            // Cleanup unavailable: keep the glyph, just dim it (alpha is baked,
+            // template off).
             let dim = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { _ in
                 img.draw(in: NSRect(x: 0, y: 0, width: 22, height: 22),
                         from: .zero, operation: .sourceOver, fraction: 0.35)

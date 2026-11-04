@@ -1,7 +1,0 @@
-fastapi
-uvicorn[standard]
-python-multipart
-mlx-whisper
-httpx
-soundfile
-numpy

@@ -1,12 +1,15 @@
 import AppKit
+import QuickScribeCore
 
-/// History popover: last 50 captures from GET /history, click-to-copy.
+/// History popover: the last 50 dictations, click to copy.
 final class HistoryWindow: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
-    private var rows: [SidecarClient.CaptureEntry] = []
+    private var rows: [HistoryEntry] = []
+    private let store: HistoryStore
     private var tableView: NSTableView!
 
-    override init() {
+    init(store: HistoryStore) {
+        self.store = store
         super.init()
         let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 480, height: 360))
         table.headerView = nil
@@ -36,15 +39,10 @@ final class HistoryWindow: NSObject, NSPopoverDelegate {
 
     func toggle(relativeTo button: NSStatusBarButton) {
         if popover.isShown { popover.close(); return }
-        SidecarClient.shared.history { [weak self] entries in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.rows = entries ?? []
-                self.tableView.reloadData()
-                self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-                self.popover.contentViewController?.view.window?.makeKey()
-            }
-        }
+        rows = store.recent()
+        tableView.reloadData()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     /// Single click copies the POLISHED text (brief AC7: click-to-copy).
@@ -90,7 +88,7 @@ extension HistoryWindow: NSTableViewDataSource, NSTableViewDelegate {
         }
         let entry = rows[row]
         let dateStr = HistoryWindow.fmt.string(from: Date(timeIntervalSince1970: entry.ts))
-        cell.textField?.stringValue = "[\(entry.profile)] \(dateStr) — \(entry.polished)"
+        cell.textField?.stringValue = "[\(entry.profile)] \(dateStr): \(entry.polished)"
         return cell
     }
 }

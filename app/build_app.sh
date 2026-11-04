@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assembles QuickScribe.app — a renameable menu-bar bundle.
+# Assembles the menu-bar app bundle.
 # App display name + bundle id live in ONE place:
 #   Sources/QuickScribe/AppInfo.swift (displayName, bundleID)
 # This script extracts them; renaming the app = edit AppInfo.swift, rebuild.
@@ -11,7 +11,7 @@ BUNDLE_ID=$(sed -n 's/.*static let bundleID = "\(.*\)"/\1/p' Sources/QuickScribe
 [[ -n "$APP_NAME" && -n "$BUNDLE_ID" ]] || { echo "FATAL: could not read name/bundle id from AppInfo.swift" >&2; exit 1; }
 
 echo "==> swift build -c release"
-swift build -c release
+swift build -c release --product QuickScribe
 
 BIN=".build/release/QuickScribe"
 APP="build/${APP_NAME}.app"
@@ -45,10 +45,12 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>      <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>1.0</string>
     <key>CFBundleVersion</key>          <string>1</string>
-    <key>LSMinimumSystemVersion</key>   <string>14.0</string>
+    <key>LSMinimumSystemVersion</key>   <string>27.0</string>
     <key>LSUIElement</key>              <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>${APP_NAME} records your voice for local dictation. Audio goes only to the local sidecar on 127.0.0.1.</string>
+    <string>${APP_NAME} listens while you hold the hotkey and turns your voice into text on this Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>${APP_NAME} uses Apple's on-device speech recognition to turn your voice into text.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>${APP_NAME} pastes dictated text into the app you are using.</string>
 </dict>

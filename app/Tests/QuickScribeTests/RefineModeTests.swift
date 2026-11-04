@@ -1,6 +1,7 @@
 import CoreGraphics
 import XCTest
 @testable import QuickScribe
+import QuickScribeCore
 
 final class VoiceModeCommandTests: XCTestCase {
     func testCommandAloneSwitchesAndInsertsNothing() {
@@ -54,7 +55,7 @@ final class RefineModeTests: XCTestCase {
 }
 
 final class PromptDraftsTests: XCTestCase {
-    private func entry(_ id: String, prompt: String = "factory", custom: Bool = false) -> SidecarClient.PromptEntry {
+    private func entry(_ id: String, prompt: String = "factory", custom: Bool = false) -> PromptEntry {
         .init(id: id, label: id, prompt: prompt, factory: "factory", custom: custom)
     }
 
@@ -74,7 +75,7 @@ final class PromptDraftsTests: XCTestCase {
         drafts.load([entry("polish")])
         XCTAssertEqual(drafts.text("polish"), "typed")
     }
-    func testCommitReplacesTheDraftWithTheSidecarsAnswer() {
+    func testCommitReplacesTheDraftWithTheStoredPrompt() {
         var drafts = PromptDrafts()
         drafts.load([entry("polish")])
         drafts.edit("polish", text: "typed")
@@ -83,11 +84,6 @@ final class PromptDraftsTests: XCTestCase {
         XCTAssertEqual(drafts.entry("polish")?.custom, true)
         drafts.commit(entry("polish"))
         XCTAssertEqual(drafts.text("polish"), "factory")
-    }
-    func testTokenEstimateRoundsUp() {
-        XCTAssertEqual(PromptDrafts.estimateTokens(""), 0)
-        XCTAssertEqual(PromptDrafts.estimateTokens("abcd"), 1)
-        XCTAssertEqual(PromptDrafts.estimateTokens("abcde"), 2)
     }
 }
 

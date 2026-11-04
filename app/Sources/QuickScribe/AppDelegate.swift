@@ -1,27 +1,24 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
+import QuickScribeCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private let session = SessionController()
-    private let historyWindow = HistoryWindow()
-    private let settingsWindow = SettingsWindow()
-
-    // MARK: Model pickers (polish: t_741dd1a3; transcription: 2026-11-01)
-    /// Persisted user choices; nil = sidecar/config default. Both pickers are
-    /// the shared ModelPicker — same honest semantics for both model classes.
-    private static let savedModelKey = "QuickScribePolishModel"
-    private static let savedSttModelKey = "QuickScribeSttModel"
-    private var polishPicker: ModelPicker!
-    private var sttPicker: ModelPicker!
+    private let prompts = PromptLibrary(fileURL: AppInfo.dataFolder.appendingPathComponent("prompts.json"))
+    private let history = HistoryStore(fileURL: AppInfo.dataFolder.appendingPathComponent("history.json"))
+    private lazy var session = SessionController(prompts: prompts, history: history)
+    private lazy var historyWindow = HistoryWindow(store: history)
+    private lazy var settingsWindow = SettingsWindow(library: prompts)
 
     /// Icon A equalizer animation — runs ONLY while recording (t_3db202e7).
     /// Static template glyph at rest so idle CPU is zero.
     private var iconTimer: Timer?
     private var iconPhase: Double = 0
-    private var sidecarDown = false
+    /// Why AI cleanup can't run right now. Dictation still works without it.
+    private var cleanupProblem: String?
+    private var cleanupDown: Bool { cleanupProblem != nil }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // LSUIElement belt-and-suspenders
@@ -30,7 +27,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = MenuBarIcon.image()
         statusItem.button?.image?.size = NSSize(width: 22, height: 22)
         statusItem.button?.toolTip = AppInfo.displayName
-        setupModelPickers()
         rebuildMenu()
 
         session.onProfileChange = { [weak self] in self?.rebuildMenu() }
@@ -46,10 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         requestMic { [weak self] in
             guard let self = self else { return }
-            self.startSidecarMonitor()
+            self.startReadinessMonitor()
             self.ensureAccessibility()
         }
-        refreshModels()   // menu-bar Models submenus (polish + transcription)
     }
 
     /// True only when the global event tap is live (hotkeys actually work).
@@ -59,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyIcon(animated: Bool, dimmed: Bool = false) {
         guard let button = statusItem.button else { return }
-        let img = (animated || sidecarDown)
+        let img = (animated || cleanupDown)
             ? (animated ? MenuBarIcon.animatedImage(phase: iconPhase, dimmed: dimmed)
                         : MenuBarIcon.image(dimmed: true))
             : MenuBarIcon.image(dimmed: dimmed)
@@ -84,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopIconAnimation() {
         iconTimer?.invalidate(); iconTimer = nil
-        applyIcon(animated: false, dimmed: sidecarDown)
+        applyIcon(animated: false, dimmed: cleanupDown)
     }
 
     // MARK: - Permissions onboarding (brief AC6: requested once, clear)
@@ -96,12 +91,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// pane ONCE, poll, and show honest state throughout (icon + overlay).
     private func ensureAccessibility() {
         if session.activate() {
-            applyIcon(animated: false, dimmed: sidecarDown)
-            statusItem.button?.toolTip = "\(AppInfo.displayName): ready — hold \(AppInfo.holdLabel)"
+            applyIcon(animated: false, dimmed: cleanupDown)
+            statusItem.button?.toolTip = readyTip
             rebuildMenu()
             return
         }
-        overlayWarn("Accessibility off — hotkeys disabled. Enable QuickScribe in System Settings.")
+        overlayWarn("Accessibility off, so hotkeys are disabled. Enable \(AppInfo.displayName) in System Settings.")
         openAccessibilityPaneOnce()
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
             Task { @MainActor in
@@ -112,13 +107,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard AXIsProcessTrusted() else { return }
                 t.invalidate()
                 if self.session.activate() {
-                    self.applyIcon(animated: false, dimmed: self.sidecarDown)
-                    self.statusItem.button?.toolTip = "\(AppInfo.displayName): ready — hold \(AppInfo.holdLabel)"
+                    self.applyIcon(animated: false, dimmed: self.cleanupDown)
+                    self.statusItem.button?.toolTip = self.readyTip
                     self.overlayWarn("Hotkeys live ✓  Hold \(AppInfo.holdLabel) to talk", autoHideAfter: 3)
                 } else {
                     // Trusted but tap refused (tccd cache race): force an
                     // app relaunch so the grant is re-evaluated fresh.
-                    self.overlayWarn("Grant recorded — relaunch QuickScribe to arm hotkeys", autoHideAfter: 5)
+                    self.overlayWarn("Permission recorded. Relaunch \(AppInfo.displayName) to turn on hotkeys.", autoHideAfter: 5)
                 }
                 self.rebuildMenu()
             }
@@ -148,61 +143,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         default:
             // Denied previously — mic prompt will NOT re-appear; say so.
-            overlayWarn("Mic denied — enable in System Settings → Privacy → Microphone", autoHideAfter: 5)
+            overlayWarn("Mic denied. Enable it in System Settings → Privacy → Microphone.", autoHideAfter: 5)
             done()
         }
     }
 
-    // MARK: - Sidecar health monitor (never crash when down — brief §8)
+    // MARK: - Readiness
 
-    /// PERMANENT monitor (t_a0fb24bb): a single ~30 s probe runs for the
-    /// app's life, so healthy → LATER-outage → recovery are all observable
-    /// without relaunch. Earlier shapes failed: launch-only probe never saw
-    /// an outage; the down-only retry stopped after success.
-    /// Invariants: exactly one timer (create-once), no overlapping requests
-    /// (in-flight gate), probes skipped while recording, and delayed
-    /// responses never overwrite the recording icon — all decided by the
-    /// pure SidecarHealth machine (unit-tested).
-    private var sidecarTimer: Timer?
-    private var sidecarProbeInFlight = false
+    /// Apple Intelligence can be turned on or finish downloading at any time, so this
+    /// keeps checking. Also makes sure the speech model is there and warmed up.
+    private var readinessTimer: Timer?
 
-    func startSidecarMonitor() {
-        probeSidecar()   // immediate first probe (launch race with LaunchAgent)
-        guard sidecarTimer == nil else { return }   // create-once: no duplicates
-        sidecarTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self else { return }
-                if self.session.isRecording { return }   // don't disturb a live session
-                self.probeSidecar()
-            }
+    private func startReadinessMonitor() {
+        session.prepare()
+        checkReadiness()
+        readinessTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkReadiness() }
         }
     }
 
-    private func probeSidecar() {
-        guard !sidecarProbeInFlight else { return }   // never overlap requests
-        sidecarProbeInFlight = true
-        SidecarClient.shared.health { [weak self] h in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.sidecarProbeInFlight = false
-                let t = SidecarHealth.next(down: self.sidecarDown, probeOK: (h != nil),
-                                           hotkeysLive: self.hotkeysLive,
-                                           recording: self.session.isRecording)
-                self.sidecarDown = t.down
-                switch t.icon {
-                case .keep: break
-                case .normal: self.applyIcon(animated: false, dimmed: false)
-                // Owner-picked restyle (t_3db202e7): dimmed Icon A replaces 🚫.
-                case .dimmed: self.applyIcon(animated: false, dimmed: true)
-                }
-                switch t.tip {
-                case .keep: break
-                case .down: self.statusItem.button?.toolTip = "\(AppInfo.displayName): sidecar down (port 8790)"
-                case .ready: self.statusItem.button?.toolTip = "\(AppInfo.displayName): ready — hold \(AppInfo.holdLabel)"
-                }
-            }
-        }
+    private func checkReadiness() {
+        let problem = AppleCleaner.unavailableReason()
+        guard problem != cleanupProblem else { return }
+        cleanupProblem = problem
+        if !session.isRecording { applyIcon(animated: false, dimmed: cleanupDown) }
+        statusItem.button?.toolTip = problem.map { "\(AppInfo.displayName): \($0)" } ?? readyTip
+        rebuildMenu()
     }
+
+    private var readyTip: String { "\(AppInfo.displayName): ready, hold \(AppInfo.holdLabel)" }
 
     // MARK: - Menu
 
@@ -210,9 +179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         if !hotkeysLive {
-            let dead = NSMenuItem(title: "⚠ Hotkeys off — grant Accessibility", action: #selector(openAXSettings), keyEquivalent: "")
+            let dead = NSMenuItem(title: "⚠ Hotkeys off: grant Accessibility", action: #selector(openAXSettings), keyEquivalent: "")
             dead.target = self
             menu.addItem(dead)
+        }
+
+        if let cleanupProblem {
+            let item = NSMenuItem(title: "⚠ \(cleanupProblem) Dictation still works, without AI cleanup.", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
         }
 
         let how = NSMenuItem(title: "Hold \(AppInfo.holdLabel) to talk, release to insert", action: nil, keyEquivalent: "")
@@ -243,9 +218,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        menu.addItem(polishPicker.submenuItem)
-        menu.addItem(sttPicker.submenuItem)
-
         let hist = NSMenuItem(title: "History (last 50)", action: #selector(showHistory), keyEquivalent: "")
         hist.target = self
         menu.addItem(hist)
@@ -274,50 +246,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func showSettings() { settingsWindow.show() }
     @objc private func toggleHandsFree() { session.toggleHandsFree() }
-
-    // MARK: - Model pickers wiring (polish: t_741dd1a3; transcription: 2026-11-01)
-    // The picker behavior itself lives in ModelPicker.swift (shared class):
-    // GET /models | /stt/models at launch + refresh; selecting POSTs the same
-    // path (hot-swap, sidecar-side), persists to UserDefaults, checkmark
-    // tracks the sidecar-reported ACTIVE model. Selection failure → previous
-    // model stays active, checkmark honestly stays on it. The app NEVER
-    // talks to HuggingFace or oMLX directly — localhost sidecar only (AC8).
-
-    private func setupModelPickers() {
-        polishPicker = ModelPicker(
-            title: "Polish Model",
-            storageKey: Self.savedModelKey,
-            fetch: { done in
-                SidecarClient.shared.listModels { m in done(m?.models, m?.current) }
-            },
-            apply: { model, done in
-                SidecarClient.shared.switchModel(model) { ok, active in done(ok, active) }
-            },
-            notify: { [weak self] msg, secs in self?.overlayWarn(msg, autoHideAfter: secs) },
-            onChanged: { [weak self] in self?.rebuildMenu() })
-
-        sttPicker = ModelPicker(
-            title: "Transcription Model",
-            storageKey: Self.savedSttModelKey,
-            fetch: { done in
-                SidecarClient.shared.listModels(path: "/stt/models") { m in done(m?.models, m?.current) }
-            },
-            // STT switches warm-load (first time may download) an MLX model
-            // inside the request before committing — allow generously; on
-            // timeout/failure the sidecar keeps the previous model active.
-            apply: { model, done in
-                SidecarClient.shared.switchModel(model, path: "/stt/models", timeout: 300) { ok, active in
-                    done(ok, active)
-                }
-            },
-            notify: { [weak self] msg, secs in self?.overlayWarn(msg, autoHideAfter: secs) },
-            onChanged: { [weak self] in self?.rebuildMenu() })
-    }
-
-    private func refreshModels() {
-        polishPicker.refresh()
-        sttPicker.refresh()
-    }
 
     @objc private func showHistory() {
         guard let button = statusItem.button else { return }

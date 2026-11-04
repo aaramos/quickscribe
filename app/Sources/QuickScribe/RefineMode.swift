@@ -1,7 +1,7 @@
 import Foundation
+import QuickScribeCore
 
-/// The everyday cleanup modes. Prompt text lives in the sidecar; the app only
-/// knows each mode's id and name.
+/// The everyday cleanup modes. Prompt text lives in PromptLibrary.
 struct RefineMode: Equatable {
     let id: String
     let title: String
@@ -57,22 +57,17 @@ enum VoiceModeCommand {
     }
 }
 
-/// What the prompt editor is showing: the sidecar's prompts plus unsaved edits.
+/// What the prompt editor is showing: the saved prompts plus unsaved edits.
 /// Drafts survive moving between modes, so switching never loses typing.
 struct PromptDrafts {
-    private(set) var entries: [SidecarClient.PromptEntry] = []
+    private(set) var entries: [PromptEntry] = []
     private var drafts: [String: String] = [:]
 
-    static func estimateTokens(_ text: String) -> Int {
-        // Same estimate as sidecar prompts.py, so the count and the limit agree.
-        Int((Double(text.utf16.count) / 4).rounded(.up))
-    }
-
-    mutating func load(_ fresh: [SidecarClient.PromptEntry]) {
+    mutating func load(_ fresh: [PromptEntry]) {
         entries = fresh
     }
 
-    func entry(_ modeID: String) -> SidecarClient.PromptEntry? {
+    func entry(_ modeID: String) -> PromptEntry? {
         entries.first { $0.id == modeID }
     }
 
@@ -89,8 +84,8 @@ struct PromptDrafts {
         drafts[modeID] = text
     }
 
-    /// The sidecar accepted a save or a reset: its answer replaces the draft.
-    mutating func commit(_ saved: SidecarClient.PromptEntry) {
+    /// A save or a reset went through: the stored prompt replaces the draft.
+    mutating func commit(_ saved: PromptEntry) {
         drafts[saved.id] = nil
         if let i = entries.firstIndex(where: { $0.id == saved.id }) {
             entries[i] = saved

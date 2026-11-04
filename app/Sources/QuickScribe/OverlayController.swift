@@ -17,7 +17,7 @@ final class OverlayController {
         case partial(String, device: String?)
         case processing
         case inserted
-        case degraded        // polish unusable (down OR blank completion) — raw inserted (brief §8)
+        case degraded        // model unavailable, refused or too slow: rule-tidied text inserted
         case cancelled
         case modeChanged(String)
         case error(String)
@@ -29,7 +29,7 @@ final class OverlayController {
             case .partial(let t, let d): return "● \(t)\(d.map { "  · \($0)" } ?? "")"
             case .processing: return "○ Transcribing…"
             case .inserted: return "✓ Inserted"
-            case .degraded: return "! Polish unavailable — inserted raw text"
+            case .degraded: return "! AI cleanup skipped, inserted your words as spoken"
             case .cancelled: return "✕ Cancelled"
             case .modeChanged(let name): return "✓ Mode: \(name)"
             case .error(let m): return "! " + m

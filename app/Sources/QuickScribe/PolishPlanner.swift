@@ -1,49 +1,32 @@
 import Foundation
 
-/// Pure polish-orchestration policy (t_a0fb24bb) — the HotkeyManager.reduce /
-/// SidecarHealth pattern: SessionController's async glue only EXECUTES the
-/// returned steps; every decision (budget, blank handling, retry allowance,
-/// stale-callback rejection) lives here and is unit-tested in
-/// Tests/QuickScribeTests.
+/// When to ask the model and which text to insert. SessionController only carries
+/// these decisions out, so the policy can be tested without audio or a model.
 ///
-/// Hard rules encoded:
-/// • Neither request may receive a timeout exceeding the REMAINING budget
-///   (old code guaranteed a 200 ms request even after the bucket expired).
-/// • Exhausted budget → insert raw immediately, degraded — NO request.
-/// • At most ONE retry, and only when time remains after the first failure.
-/// • degraded=true from the sidecar and a blank (empty/whitespace) 200 result
-///   are both "unusable polish" → same ladder (owner decision 2026-11-01:
-///   keep raw fallback, including filler-only speech — never silently drop
-///   the transcript).
-/// • A callback from a superseded generation (cancel/new session) is a no-op.
+/// There is one attempt, not a retry: cleanup output is deterministic, so a refusal
+/// would simply repeat. A failure always falls back to the rule-tidied text, because
+/// the person's words must never be lost. (Owner decision 2026-11-01: filler-only
+/// speech is kept too, so a tidied result that comes out empty falls back to raw.)
 enum PolishPlanner {
     enum Step: Equatable {
-        case stale                        // generation moved on — do nothing
-        case request(timeout: TimeInterval)
-        case insertPolished(String)       // usable result — insert it, not degraded
-        case insertRaw                    // budget gone or polish unusable — raw, degraded
+        case askModel(timeout: TimeInterval, tidied: String)
+        case insert(String, cleaned: Bool)
     }
 
-    /// A result is usable only when NOT degraded and non-blank.
-    static func usable(polished: String?, degraded: Bool) -> Bool {
-        guard !degraded, let t = polished else { return false }
-        return !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// First attempt: request only while budget remains; else raw immediately.
-    static func firstStep(budget: Double, spent: TimeInterval) -> Step {
+    static func firstStep(raw: String, tidied: String, modelReady: Bool, budget: Double, spent: TimeInterval) -> Step {
+        guard !tidied.isEmpty else { return .insert(raw, cleaned: false) }
         let remaining = budget - spent
-        guard remaining > 0 else { return .insertRaw }
-        return .request(timeout: remaining)   // ≤ budget by construction
+        guard modelReady, remaining > 0 else { return .insert(tidied, cleaned: false) }
+        return .askModel(timeout: remaining, tidied: tidied)
     }
 
-    /// After an attempt returns. `attempt` is 1-based; a second (or later)
-    /// unusable result falls back to raw regardless of any leftover budget.
-    static func stepAfterResult(budget: Double, spent: TimeInterval, attempt: Int,
-                                stale: Bool, polished: String?, degraded: Bool) -> Step {
-        if stale { return .stale }
-        if usable(polished: polished, degraded: degraded) { return .insertPolished(polished!) }
-        guard attempt < 2 else { return .insertRaw }
-        return firstStep(budget: budget, spent: spent)   // retry only if time remains
+    static func usable(_ output: String?) -> Bool {
+        guard let output else { return false }
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func stepAfterModel(output: String?, tidied: String) -> Step {
+        guard usable(output), let output else { return .insert(tidied, cleaned: false) }
+        return .insert(output, cleaned: true)
     }
 }

@@ -1,40 +1,37 @@
 import Foundation
 
-/// SINGLE PLACE for app identity (brief §Naming / acceptance 9).
-/// build_app.sh reads these constants to generate Info.plist.
+/// SINGLE PLACE for app identity. build_app.sh reads these constants to generate
+/// Info.plist. Its own name and bundle id keep its permissions and data apart from
+/// the original QuickScribe.
 enum AppInfo {
-    static let displayName = "QuickScribe"
-    static let bundleID = "local.quickscribe"
+    static let displayName = "QuickScribe Native"
+    static let bundleID = "local.quickscribe.native"
 
-    /// Sidecar contract (runbook §Contracts) — localhost only, port fixed.
-    static let sidecarBase = "http://127.0.0.1:8790"
+    /// Both apps listen for the same hotkey, so running them together would paste twice.
+    static let originalBundleID = "local.quickscribe"
 
-    /// PRIMARY hotkey chord (owner UX change 2026-09-18: modifier-only hold;
-    /// the old ⌘⌥Space binding was removed — it collided with other apps).
-    /// Hold ⌃⌘ = capture start (after `holdDwell` with no key press);
-    /// release either modifier = stop, polish, insert. The actual flag masks
-    /// live in HotkeyManager (the single behavioral source of truth); these
-    /// unused constants used to duplicate them and have been removed.
-    /// Human-readable labels — defined ONCE here (brief §Naming / acceptance 9).
+    static var dataFolder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(displayName, isDirectory: true)
+    }
+
+    /// Hold ⌃⌘ to capture (after `holdDwell` with no key press); release either
+    /// modifier to stop, clean up and insert. Flag masks live in HotkeyManager.
     static let holdLabel = "⌃⌘"
     static let holdRewriteLabel = "⌃⌘⇧"
-    /// Both modifiers must be held this long, with NO key press in between,
-    /// before capture starts. Key press before dwell elapses → abort start and
-    /// pass through (⌃⌘F / ⌃⌘Q / ⌃⌘Space keep working normally).
+    /// Key press before the dwell elapses aborts the start and passes through, so
+    /// ⌃⌘F, ⌃⌘Q and ⌃⌘Space keep working normally.
     static let holdDwell: TimeInterval = 0.15
 
-    /// Streaming chunk boundary for /transcribe partial (runbook: ~1–2 s).
-    /// Chunks are NON-overlapping: partial results concatenate verbatim,
-    /// which makes final assembly exact (see docs/decisions/ADR-001).
-    static let chunkSeconds: Double = 1.5
+    /// Audio is judged for silence in windows this long.
+    static let silenceWindowSeconds: Double = 1.5
 
-    /// Silence gate (t_b3e7802c "silent-input-must-not-lie"): chunks whose
-    /// RMS is below this floor never reach the decoder. ~-48 dBFS — well
-    /// under conversational speech (~-30..-20 dBFS), well over BlackHole
-    /// digital silence. Mirrored in sidecar stt.py as defense-in-depth.
+    /// About -48 dBFS: well under conversational speech, well over the digital
+    /// silence of a virtual device like BlackHole.
     static let silenceRmsFloor: Double = 0.004
 
-    /// TTI budgets from brief §Speed (seconds) — polish wait is bounded by bucket.
+    /// How long a dictation of each length may take after release, in seconds. Past
+    /// this, the rule-tidied text is inserted without waiting for the model.
     static let ttiBudgets: [(maxSeconds: Double, p50: Double)] = [
         (10, 1.5), (30, 2.5), (60, 5.0)
     ]

@@ -1,4 +1,5 @@
 import AppKit
+import QuickScribeCore
 
 /// One-screen Settings: the editable "Refine Prompts" for each mode, plus a
 /// sandbox that runs the text on screen without saving it.
@@ -8,8 +9,9 @@ final class SettingsWindow: NSObject, NSTextViewDelegate {
         "um so basically the report was written by Sarah and uh we should meet at 2, actually 3, to go over it"
 
     private(set) var window: NSWindow?
+    private let library: PromptLibrary
+    private let cleaner = AppleCleaner()
     private var drafts = PromptDrafts()
-    private var maxTokens = 2000
     private var modeID = RefineMode.all[0].id
 
     private let modePicker = NSSegmentedControl(labels: RefineMode.all.map(\.title),
@@ -22,6 +24,11 @@ final class SettingsWindow: NSObject, NSTextViewDelegate {
     private let testButton = NSButton(title: "Test Prompt", target: nil, action: nil)
     private let testOutput = SettingsWindow.makeTextView()
 
+    init(library: PromptLibrary) {
+        self.library = library
+        super.init()
+    }
+
     func show() {
         if window == nil { window = buildWindow() }
         installEditMenu()
@@ -33,30 +40,8 @@ final class SettingsWindow: NSObject, NSTextViewDelegate {
     // MARK: - Loading and display
 
     private func reload() {
-        SidecarClient.shared.listPrompts { [weak self] list in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                guard let list = list else {
-                    self.status.stringValue = "Sidecar is down, so prompts can't be loaded."
-                    self.setEditing(false)
-                    return
-                }
-                self.drafts.load(list.modes)
-                self.maxTokens = list.max_tokens
-                self.setEditing(true)
-                self.showCurrentMode()
-            }
-        }
-    }
-
-    private func setEditing(_ on: Bool) {
-        editor.isEditable = on
-        testButton.isEnabled = on
-        modePicker.isEnabled = on
-        if !on {
-            saveButton.isEnabled = false
-            resetButton.isEnabled = false
-        }
+        drafts.load(library.entries())
+        showCurrentMode()
     }
 
     private func showCurrentMode() {
@@ -66,12 +51,12 @@ final class SettingsWindow: NSObject, NSTextViewDelegate {
 
     private func refreshStatus(message: String? = nil) {
         guard let entry = drafts.entry(modeID) else { return }
-        let tokens = PromptDrafts.estimateTokens(editor.string)
+        let tokens = PromptLibrary.estimateTokens(editor.string)
         let dirty = drafts.isDirty(modeID)
         let state = dirty ? "Unsaved changes" : (entry.custom ? "Your prompt" : "Factory default")
-        status.stringValue = "\(message ?? state)  ·  about \(tokens) of \(maxTokens) tokens"
-        status.textColor = tokens > maxTokens ? .systemRed : .secondaryLabelColor
-        saveButton.isEnabled = dirty && tokens <= maxTokens
+        status.stringValue = "\(message ?? state)  ·  about \(tokens) of \(PromptLibrary.maxTokens) tokens"
+        status.textColor = tokens > PromptLibrary.maxTokens ? .systemRed : .secondaryLabelColor
+        saveButton.isEnabled = dirty && tokens <= PromptLibrary.maxTokens
         resetButton.isEnabled = entry.custom || dirty
     }
 
@@ -89,51 +74,53 @@ final class SettingsWindow: NSObject, NSTextViewDelegate {
     }
 
     @objc private func saveTapped() {
-        let target = modeID
-        SidecarClient.shared.savePrompt(mode: target, text: drafts.text(target)) { [weak self] saved, problem in
-            DispatchQueue.main.async {
-                self?.finishChange(target, saved: saved, problem: problem, success: "Saved. The next dictation uses it.")
-            }
-        }
+        change(success: "Saved. The next dictation uses it.") { try library.save(modeID, text: drafts.text(modeID)) }
     }
 
     @objc private func resetTapped() {
-        let target = modeID
-        SidecarClient.shared.resetPrompt(mode: target) { [weak self] saved, problem in
-            DispatchQueue.main.async {
-                self?.finishChange(target, saved: saved, problem: problem, success: "Restored the factory prompt.")
-            }
-        }
+        change(success: "Restored the factory prompt.") { try library.reset(modeID) }
     }
 
-    private func finishChange(_ target: String, saved: SidecarClient.PromptEntry?,
-                              problem: String?, success: String) {
-        guard let saved = saved else {
-            refreshStatus(message: problem ?? "Couldn't reach the sidecar. Nothing changed.")
-            return
-        }
-        drafts.commit(saved)
-        if target == modeID {
+    private func change(success: String, _ action: () throws -> PromptEntry) {
+        do {
+            drafts.commit(try action())
             showCurrentMode()
             refreshStatus(message: success)
+        } catch {
+            refreshStatus(message: "\(error.localizedDescription) Nothing changed.")
         }
     }
 
     @objc private func testTapped() {
         testButton.isEnabled = false
         testOutput.string = "Running…"
-        SidecarClient.shared.testPrompt(text: sampleInput.string, prompt: editor.string) { [weak self] output, degraded, problem in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.testButton.isEnabled = true
-                if let output = output, !degraded {
-                    self.testOutput.string = output
-                } else if degraded {
-                    self.testOutput.string = "The model didn't answer, so a dictation would insert the raw text."
-                } else {
-                    self.testOutput.string = problem ?? "Couldn't reach the sidecar."
-                }
+        let sample = TextCleanup.tidy(sampleInput.string)
+        let prompt = editor.string
+        let cleaner = cleaner
+        Task { [weak self] in
+            let message: String
+            do {
+                try PromptLibrary.validate(prompt)
+                if let reason = AppleCleaner.unavailableReason() { throw TestProblem(message: reason) }
+                message = try await cleaner.clean(sample, instructions: prompt)
+            } catch let failure as CleanupFailure {
+                message = Self.explain(failure)
+            } catch {
+                message = (error as? TestProblem)?.message ?? error.localizedDescription
             }
+            self?.testOutput.string = message
+            self?.testButton.isEnabled = true
+        }
+    }
+
+    private struct TestProblem: Error { let message: String }
+
+    private static func explain(_ failure: CleanupFailure) -> String {
+        switch failure {
+        case .refused: return "Apple's model declined this text, so a dictation would insert it with fillers removed."
+        case .tooLong: return "This prompt plus the sample is too long for Apple's model."
+        case .blank: return "The model returned nothing, so a dictation would insert the text with fillers removed."
+        default: return "The model didn't answer, so a dictation would insert the text with fillers removed."
         }
     }
 

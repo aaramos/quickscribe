@@ -4,8 +4,7 @@ import Foundation
 
 /// Input-device resolution (t_b3e7802c): the OS default input on this host
 /// is BlackHole 2ch — a virtual loopback that carries NO live signal, which
-/// is exactly what fed Whisper the silence that produced the "Thank you."
-/// hallucination loops. The app must therefore NEVER trust the OS default
+/// once fed the recognizer silence and produced invented text. The app must therefore NEVER trust the OS default
 /// blindly.
 ///
 /// Resolution order:
