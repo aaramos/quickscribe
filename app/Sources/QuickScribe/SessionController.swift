@@ -276,7 +276,7 @@ final class SessionController {
                 try await cleaner.clean(tidied, instructions: instructions)
             }
             guard let self, self.generation == gen else { return }
-            self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied))
+            self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied, mode: prof))
         }
     }
 

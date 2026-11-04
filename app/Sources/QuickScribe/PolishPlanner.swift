@@ -1,4 +1,5 @@
 import Foundation
+import QuickScribeCore
 
 /// When to ask the model and which text to insert. SessionController only carries
 /// these decisions out, so the policy can be tested without audio or a model.
@@ -25,8 +26,13 @@ enum PolishPlanner {
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    static func stepAfterModel(output: String?, tidied: String) -> Step {
-        guard usable(output), let output else { return .insert(tidied, cleaned: false) }
+    /// The model's output only reaches the document if it passes CleanupGuard. Otherwise
+    /// the person's own tidied words go in, so an answer or a refusal can never be pasted.
+    static func stepAfterModel(output: String?, tidied: String, mode: String) -> Step {
+        guard usable(output), let output,
+              CleanupGuard.accepts(output: output, input: tidied, mode: mode) else {
+            return .insert(tidied, cleaned: false)
+        }
         return .insert(output, cleaned: true)
     }
 }

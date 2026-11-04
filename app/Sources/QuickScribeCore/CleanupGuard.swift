@@ -6,7 +6,12 @@ import Foundation
 /// reach the person's document. When in doubt the tidied text is inserted: losing a
 /// cleanup is cheap, and inserting an answer nobody dictated is not.
 public enum CleanupGuard {
-    private struct Limits { let maxNewWords: Double; let minLength: Double }
+    private struct Limits {
+        let maxNewWords: Double
+        let minLength: Double
+        var maxGrowth = 1.5
+        var extraWords = 8.0
+    }
 
     private static func limits(_ mode: String) -> Limits? {
         switch mode {
@@ -15,7 +20,9 @@ public enum CleanupGuard {
         case "active_voice": return Limits(maxNewWords: 0.5, minLength: 0.4)
         // Rewrite is meant to change the wording, so only output that's nearly all new
         // words counts as something other than a rewrite, like an obeyed "tell me a joke".
-        case FactoryPrompts.rewriteID: return Limits(maxNewWords: 0.75, minLength: 0.25)
+        // It's meant to tighten too, so it can't grow much: that catches a joke or an
+        // invented summary with the speaker's own words stuck on the front.
+        case FactoryPrompts.rewriteID: return Limits(maxNewWords: 0.75, minLength: 0.25, maxGrowth: 1.2, extraWords: 4)
         default: return nil
         }
     }
@@ -30,7 +37,7 @@ public enum CleanupGuard {
         let given = words(input).filter(isNotNumber), produced = words(output).filter(isNotNumber)
         guard !produced.isEmpty || given.isEmpty else { return false }
         if Double(produced.count) < Double(given.count) * limits.minLength { return false }
-        if Double(produced.count) > Double(given.count) * 1.5 + 8 { return false }
+        if Double(produced.count) > Double(given.count) * limits.maxGrowth + limits.extraWords { return false }
         let known = Set(given)
         let new = produced.filter { !known.contains($0) }
         if !produced.isEmpty, Double(new.count) / Double(produced.count) > limits.maxNewWords { return false }
