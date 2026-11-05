@@ -51,11 +51,14 @@ final class OverlayController {
     }
 
     private static let height: CGFloat = 40
-    private static let recordingHeight: CGFloat = 78
-    private static let maxWidth: CGFloat = 520
+    // The owner tunes the pill's size from these two lines.
+    static let recordingHeight: CGFloat = 98
+    static let maxWidth: CGFloat = 650
     /// What a single message line has to fit in at the pill's font: the panel
     /// max minus the row's padding. Notices are written to this budget.
-    static let messageTextBudget: CGFloat = 460
+    /// What the one-line message can measure across: the pill's width less
+    /// its padding. With maxWidth up to 650 this grows with it automatically.
+    static let messageTextBudget: CGFloat = maxWidth - 60
     private static let gapBelowMenuBar: CGFloat = 8
 
     private let panel: NSPanel
@@ -274,7 +277,10 @@ final class WaveformView: NSView {
         }
     }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: 180, height: 44) }
+    // The wave box: about a quarter larger all round, also for the owner to tune.
+    static let waveWidth: CGFloat = 225
+    static let waveHeight: CGFloat = 55
+    override var intrinsicContentSize: NSSize { NSSize(width: Self.waveWidth, height: Self.waveHeight) }
 
     func push(_ newLevel: Double) {
         target = CGFloat(Self.loudness(fromLevel: newLevel))
@@ -282,11 +288,15 @@ final class WaveformView: NSView {
 
     /// Normal speech is far quieter than the mic's full range, so a straight reading barely
     /// registers. Ears hear loudness in decibels, so this maps the range speech really uses
-    /// (-48 dB, the silence floor, up to -22 dB) onto the waves' full height.
+    /// onto the waves' full height. The two numbers are the owner's tuning knobs: the floor
+    /// is where pauses go flat, the ceiling is where the top of a speaking voice sits.
+    /// The ceiling came down from -22 dB so ordinary speech fills the taller waves.
+    static let silenceFloorDb = -48.0
+    static let topOfSpeechDb = -26.0
     static func loudness(fromLevel level: Double) -> Double {
         let rms = level / 6       // AudioCapture reports its level as rms x 6
         guard rms > 0 else { return 0 }
-        return max(0, min(1, (20 * log10(rms) + 48) / 26))
+        return max(0, min(1, (20 * log10(rms) - silenceFloorDb) / (topOfSpeechDb - silenceFloorDb)))
     }
 
     func reset() {

@@ -23,12 +23,13 @@ final class OverlayShotsTests: XCTestCase {
             try await Task.sleep(nanoseconds: 350_000_000)
             let frame = overlay.panelFrameForTesting
             XCTAssertTrue(overlay.panelIsVisibleForTesting, name)
-            XCTAssertEqual(frame.height, state.isRecording ? 78 : 40, name)
+            XCTAssertEqual(frame.height, state.isRecording ? OverlayController.recordingHeight : 40, name)
             let screen = try XCTUnwrap(NSScreen.screens.first { $0.frame.contains(frame) })
             XCTAssertEqual(frame.midX, screen.visibleFrame.midX, accuracy: 1, name)
             XCTAssertLessThanOrEqual(frame.maxY, screen.visibleFrame.maxY, name)
             XCTAssertGreaterThan(frame.maxY, screen.visibleFrame.maxY - 20, name)
-            XCTAssertLessThanOrEqual(frame.width, 520, name)
+            XCTAssertLessThanOrEqual(frame.width, OverlayController.maxWidth, name)
+            XCTAssertLessThanOrEqual(frame.maxX, screen.visibleFrame.maxX, "\(name) stays on the screen it sits on")
             XCTAssertGreaterThanOrEqual(frame.width, 40, name)
             print("PILL", name, Int(frame.width), "x", Int(frame.height))
             if let folder, let view = overlay.panelContentForTesting {
@@ -46,10 +47,29 @@ final class OverlayShotsTests: XCTestCase {
     func testNormalSpeechFillsMostOfTheWaveHeight() {
         func loudness(rms: Double) -> Double { WaveformView.loudness(fromLevel: rms * 6) }
         XCTAssertEqual(WaveformView.loudness(fromLevel: 0), 0)
-        XCTAssertEqual(loudness(rms: 0.003), 0, "room noise stays flat")
-        XCTAssertGreaterThan(loudness(rms: 0.01), 0.25, "quiet speech")
-        XCTAssertGreaterThan(loudness(rms: 0.03), 0.6, "normal speech")
+        XCTAssertGreaterThan(loudness(rms: 0.01), 0.3, "quiet speech now climbs the taller waves")
+        XCTAssertGreaterThan(loudness(rms: 0.03), 0.75, "normal speech rides near the top")
         XCTAssertEqual(loudness(rms: 0.1), 1, "loud speech")
+    }
+
+    func testRoomNoiseKeepsTheWavesNearlyFlat() {
+        func loudness(rms: Double) -> Double { WaveformView.loudness(fromLevel: rms * 6) }
+        // A laptop fan or a humming room sits well under the silence floor;
+        // pauses must still go nearly flat against it, not just against digital
+        // zero. A real mic against the room's actual noise is the owner's call.
+        for noise in [0.0004, 0.001, 0.002, 0.0035] {
+            XCTAssertLessThanOrEqual(loudness(rms: noise), 0.15, "rms \(noise) must not wake the waves")
+        }
+        XCTAssertEqual(loudness(rms: 0.003), 0, "ordinary room noise stays flat")
+    }
+
+    func testTheTunedNumbersAreTheTickets() {
+        XCTAssertEqual(OverlayController.recordingHeight, 98)
+        XCTAssertEqual(OverlayController.maxWidth, 650)
+        XCTAssertEqual(WaveformView.waveWidth, 225)
+        XCTAssertEqual(WaveformView.waveHeight, 55)
+        XCTAssertEqual(WaveformView.silenceFloorDb, -48)
+        XCTAssertEqual(WaveformView.topOfSpeechDb, -26)
     }
 
     private func save(_ view: NSView, to path: String) {
