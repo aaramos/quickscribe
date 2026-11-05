@@ -65,6 +65,17 @@ final class CleanupPromptsTests: XCTestCase {
         "data: {\"choices\":[{\"delta\":{\"content\":\"\(content)\"}}]}\n\n"
             + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
     }
+
+    func testEveryFactoryPromptForbidsInventingATimeOfDay() {
+        for (name, text) in FactoryPrompts.all.merging([FactoryPrompts.rewriteID: FactoryPrompts.rewrite]) { $1 } {
+            XCTAssertTrue(text.contains("a.m."), "\(name) must forbid the invented time")
+            XCTAssertTrue(text.contains("p.m."), "\(name) must forbid the invented time")
+        }
+        for (name, text) in ServicePrompts.all {
+            XCTAssertTrue(text.contains("a.m."), "service \(name) must forbid the invented time")
+            XCTAssertTrue(text.contains("p.m."), "service \(name) must forbid the invented time")
+        }
+    }
 }
 
 
