@@ -102,8 +102,10 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(insecure, .malformed, "http is not https")
         let local = await check(release(tag: "v9.9", page: "file:///tmp/release.html"), 200)
         XCTAssertEqual(local, .malformed, "a file address never opens a browser")
-        let suffix = await check(release(tag: "v9.9", page: "https://github.com/github.com.example/evil/releases/x"), 200)
-        XCTAssertEqual(suffix, .malformed, "host is matched whole, not as a prefix")
+        let nearMiss = await check(release(tag: "v9.9", page: "https://github.com.evil.example/example/native/releases/tag/v9.9"), 200)
+        XCTAssertEqual(nearMiss, .malformed, "a host that starts like github.com is not github.com")
+        let madeUp = await check(release(tag: "v9.9", page: "https://notgithub.com/example/native/releases/tag/v9.9"), 200)
+        XCTAssertEqual(madeUp, .malformed, "a host that ends like github.com is not github.com either")
     }
 
     // MARK: v-shape is one version

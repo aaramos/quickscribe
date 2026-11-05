@@ -3,9 +3,9 @@ import XCTest
 
 /// The honest place to read what a check really sends: a real ephemeral
 /// URLSession, no protocol class in the way, answering to a listener on
-/// this machine's own loopback. The review found Accept-Language: en-US
-/// arriving here even when the request object never set it, so this test
-/// reads the bytes, not the object.
+/// this machine's own loopback. URLSession adds headers behind the code's
+/// back, whatever the request object was set to, so this test reads the
+/// bytes that arrived and allows exactly that list and nothing else.
 final class WireProofTests: XCTestCase {
     func testWhatTheRealStackSends() async throws {
         let listener = Listener()
@@ -19,9 +19,21 @@ final class WireProofTests: XCTestCase {
         let session = URLSession(configuration: .ephemeral)
         _ = try? await session.data(for: sent)
         let raw = await listener.received()
-        XCTAssertTrue(raw.contains("User-Agent: QuickScribe/2.0"), raw)
-        XCTAssertTrue(raw.contains("Accept-Language: en\r\n"),
-                      "must be the fixed value, not the person's language: \(raw)")
+        listener.stop()
+        let headerLines = raw.components(separatedBy: "\r\n").dropFirst()   // past the GET line
+            .prefix { !$0.isEmpty }
+        var names: [String] = []
+        var values: [String: String] = [:]
+        for line in headerLines {
+            guard let i = line.firstIndex(of: ":") else { continue }
+            names.append(String(line[..<i]))
+            values[String(line[..<i])] = String(line[line.index(after: i)...].trimmingCharacters(in: .whitespaces))
+        }
+        XCTAssertEqual(Set(names), Set(["Host", "Accept", "Accept-Language", "Accept-Encoding", "User-Agent", "Connection"]),
+                       "the exact set that arrives, so a new header fails here: \(names)")
+        XCTAssertEqual(values["User-Agent"], "QuickScribe/2.0")
+        XCTAssertEqual(values["Accept-Language"], "en",
+                       "the fixed value, not the person's language")
         XCTAssertFalse(raw.lowercased().contains("q=0.9"), "no negotiation, no dialect detail")
         XCTAssertFalse(raw.lowercased().contains("cookie"), "nothing stored, nothing replayed")
     }
@@ -56,6 +68,8 @@ final class Listener: @unchecked Sendable {
         let ok = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}".cString(using: .utf8)!
         write(fd, ok, ok.count); close(fd)
     }
+    func stop() { close(sock) }
+
     func received() async -> String {
         for _ in 0..<50 { lock.lock(); let t = text; lock.unlock(); if !t.isEmpty { return t }
             try? await Task.sleep(nanoseconds: 100_000_000) }
