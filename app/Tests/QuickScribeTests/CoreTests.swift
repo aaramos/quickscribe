@@ -161,9 +161,14 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertTrue(CleanupGuard.accepts(output: "I am meeting Dana at 3 on Friday.",
                                            input: "i am meeting dana at three on friday", mode: "polish"),
                       "I am must never read as a.m.")
-        XCTAssertTrue(CleanupGuard.accepts(output: "Let's start at 3 am I right.",
-                                           input: "let's start at three am i right", mode: "polish"),
-                      "3 am I: the am is the verb, the guard must stay shut")
+        // On the ANSWER side the exception is gone: an am glued to the hour,
+        // even "3 am I right", is refused, because falling back is cheap.
+        // On the SPEAKER side the verb never supplies a marker.
+        XCTAssertFalse(CleanupGuard.accepts(output: "Let's start at 3 am I right.",
+                                            input: "let's start at three am i right", mode: "polish"),
+                       "a written am the speaker did not say drops to the person's words")
+        XCTAssertTrue(CleanupGuard.accepts(output: "At 3 a.m. I left.", input: "at 3 a.m. i left", mode: "polish"),
+                      "a dotted a.m. the speaker said stands as evidence before the verb")
         XCTAssertFalse(CleanupGuard.accepts(output: "I am 3pm on the dot.",
                                             input: "i am on the dot at three", mode: "polish"),
                        "a real invented 3pm is stamped even beside a verb am")
@@ -195,6 +200,58 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 p.m. Friday.",
                                             input: Friday, mode: "rewrite"))
     }
+    func testEveryMarkerIsTiedToItsOwnNumber() {
+        // Currency. One said dollar clears only its own number.
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "The invoice total is $1,200, actually $1,450, and the account number ends in $6,729.",
+            input: "the invoice total is $1,200, actually $1,450 and the account number ends in 6729", mode: "polish"),
+            "the account number never had money on it")
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "$5 for the fee, room number is $212.",
+            input: "the fee is 5 dollars and the room number is 212", mode: "polish"),
+            "dollars on the fee do not license a sign on the room number")
+        // Doubt refuses too: the sign moved between self-corrected numbers.
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "The quote was $1,450.",
+            input: "the quote was $1,200, actually 1450", mode: "polish"))
+        // Still fine: the number the speaker gave in money words or signs.
+        XCTAssertTrue(CleanupGuard.accepts(output: "$4.2 million last quarter.",
+                                           input: "4.2 million dollars last quarter", mode: "polish"))
+        // A spelled number and a written one are the same number. Asserted on
+        // the currency rule alone: repeating one number as words AND digits in
+        // one answer trips the old digit-stream rule on purpose.
+        XCTAssertFalse(CleanupGuard.inventsCurrency(output: "The total is $50,000.",
+                                                    input: "forty thousand, sorry, fifty thousand dollars"))
+
+        // Time of day, tied and same-kind.
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "The call is at 9 a.m. and lunch is at 1 p.m.",
+            input: "the call is at 9 a.m. and lunch is at one", mode: "polish"),
+            "a spoken morning does not clear an invented afternoon")
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "The call is at 9 p.m. tomorrow.",
+            input: "the call is at 9 a.m. tomorrow", mode: "polish"),
+            "the worst case: a wrong time that reads as right")
+        // Markers must ride their own number; the sentence next door is not evidence.
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet me at 3 p.m. on Friday.",
+                                            input: "stop. Meet me at three on friday", mode: "polish"))
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet me at 3 p.m.",
+                                            input: "we flew to tampa. meet me at three", mode: "polish"))
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 2 p.m., we have 3 ideas.",
+                                            input: "we have 3 amazing ideas, so meet at two", mode: "polish"),
+                      "amazing is not a.m., and the PM next door is not p.m.")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 p.m. on Friday.",
+                                            input: "ask the pm about the meeting at three", mode: "polish"),
+                      "a person called the PM has not said p.m. about the hour")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet at three pm on friday.",
+                                            input: "meet at three on friday", mode: "polish"),
+                      "the lower-case shape is caught like the upper-case one")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Meet at 3 p.m. on Friday.",
+                                           input: "meet at three pm friday", mode: "polish"))
+        XCTAssertTrue(CleanupGuard.accepts(output: "I am meeting Dana at 3 on Friday.",
+                                           input: "i am meeting dana at three on friday", mode: "polish"))
+    }
+
 
 
 }
