@@ -56,7 +56,7 @@ final class OverlayShotsTests: XCTestCase {
         func loudness(rms: Double) -> Double { WaveformView.loudness(fromLevel: rms * 6) }
         // A laptop fan or a humming room sits well under the silence floor;
         // pauses must still go nearly flat against it, not just against digital
-        // zero. A real mic against the room's actual noise is the owner's call.
+        // zero. A real mic against the room's actual noise can only be judged in a real room.
         for noise in [0.0004, 0.001, 0.002, 0.0035] {
             XCTAssertLessThanOrEqual(loudness(rms: noise), 0.15, "rms \(noise) must not wake the waves")
         }

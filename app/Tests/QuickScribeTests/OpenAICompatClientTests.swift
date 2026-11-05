@@ -3,7 +3,8 @@ import XCTest
 @testable import QuickScribeCore
 
 /// Drives the real client against a real localhost HTTP server: every failure
-/// form the card lists, plus the exact wire shapes the sidecar client used.
+/// form an address can answer with, plus the exact wire shapes this client
+/// has always sent.
 final class OpenAICompatClientTests: XCTestCase {
     var service: FakeService!
     var settings: EndpointSettings!
@@ -195,7 +196,7 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertEqual(req.headers["authorization"], "Bearer test-key-local")
     }
 
-    /// The ticket's path in miniature: captured buffers become a whole WAV and
+    /// The whole recording's path in miniature: captured buffers become a whole WAV and
     /// reach the service as the upload file, in the app's own multipart shape.
     func testWholeRecordingUploadsAsTheTranscriptionFile() async throws {
         service.queue(service.text(#"{"text":"fourteen hundred fifty"}"#), forPath: "/v1/audio/transcriptions")

@@ -1,6 +1,6 @@
 Prompt line against invented times of day, before and after.
 
-The two temptations from the ticket:
+The two temptations these sentences put in front of the model:
   t1: Um so let's meet at two, actually three on Friday, and the plan
       was approved by Dana.
   t2: The pharmacy closes at nine tonight, so could you pick up the

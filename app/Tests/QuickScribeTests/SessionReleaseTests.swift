@@ -5,7 +5,8 @@ import XCTest
 
 /// Drives the release path (processRelease) without a microphone: stubbed
 /// recognizer, fake service, fake keyboard and clipboard. Every ordering rule
-/// the review asked for is checked here as it would happen on a real release.
+/// is checked here as it would happen on a real release, one ordering rule
+/// at a time.
 @MainActor
 final class SessionReleaseTests: XCTestCase {
     private var session: SessionController!
@@ -96,7 +97,7 @@ final class SessionReleaseTests: XCTestCase {
         }
     }
 
-    // MARK: - Fix 7: only the service route pays for the recording
+    // MARK: - Only the service route pays for the recording
 
     func testAppleRouteKeepsNoWholeRecordingAndNeverReadsTheKey() async {
         chooseAppleSpeech()
@@ -108,7 +109,7 @@ final class SessionReleaseTests: XCTestCase {
         session.processRelease(customChosen: false, silent: false, live: live)
         await waitUntil { self.insertedAfter != nil }
         XCTAssertEqual(self.insertedAfter, "Apple said this.")
-        XCTAssertEqual(secrets.reads, 0, "fix 6: the Keychain is untouched on the Apple route")
+        XCTAssertEqual(secrets.reads, 0, "the Keychain is untouched on the Apple route")
         XCTAssertEqual(session.pillLog.last, .degraded, "no notice earned, so the plain result pill shows")
     }
 
@@ -124,10 +125,10 @@ final class SessionReleaseTests: XCTestCase {
         session.processRelease(customChosen: true, silent: false, live: live)
         await waitUntil { self.insertedAfter != nil }
         XCTAssertNil(session.recording, "the session lets go of the buffer at release")
-        XCTAssertEqual(buffer.wav().data.count, 44, "fix 7: discarded, so a late buffer cannot grow it back")
+        XCTAssertEqual(buffer.wav().data.count, 44, "discarded, so a late buffer cannot grow it back")
     }
 
-    // MARK: - Fix 4: Apple winds down at release; a good reply never waits on it
+    // MARK: - Apple winds down at release; a good reply never waits on it
 
     func testServiceReplyIsInsertedEvenWhileAppleHangs() async {
         chooseCustomSpeech()
@@ -146,7 +147,7 @@ final class SessionReleaseTests: XCTestCase {
         XCTAssertEqual(session.pillLog.last, .degraded)   // cleanup skipped by override; the insert happened anyway
     }
 
-    // MARK: - Fix 1: neither service outcome spends the cleanup budget
+    // MARK: - Neither service outcome spends the cleanup budget
 
     func testSlowFailureStillLetsCleanupUseTheWholeBudget() async {
         chooseCustomSpeech()
@@ -162,7 +163,7 @@ final class SessionReleaseTests: XCTestCase {
         session.processRelease(customChosen: true, silent: false, live: live)
         await waitUntil { self.insertedAfter != nil }
         XCTAssertEqual(self.insertedAfter, "Apple said this.")
-        XCTAssertEqual(fakeCleaner.calls, 1, "fix 1: the fallback must still be offered to the cleanup model")
+        XCTAssertEqual(fakeCleaner.calls, 1, "the fallback must still be offered to the cleanup model")
     }
 
     func testSlowSuccessStillLetsCleanupUseTheWholeBudget() async {
@@ -180,7 +181,7 @@ final class SessionReleaseTests: XCTestCase {
         XCTAssertEqual(fakeCleaner.calls, 1, "speech time never counts against cleanup")
     }
 
-    // MARK: - Fix 5: blank is no words
+    // MARK: - Blank is no words
 
     func testBlankReplyFromTheServiceIsTreatedAsFailure() async {
         chooseCustomSpeech()
@@ -193,11 +194,11 @@ final class SessionReleaseTests: XCTestCase {
         session.processRelease(customChosen: true, silent: false, live: live)
         await waitUntil { self.insertedAfter != nil }
         XCTAssertEqual(self.insertedAfter, "Apple said this.",
-                       "fix 5: '   ' is no words; Apple's answer is used, not 'Nothing captured'")
+                       "'   ' is no words; Apple's answer is used, not 'Nothing captured'")
         XCTAssertNotEqual(session.pillLog.last, .error("Nothing captured"))
     }
 
-    // MARK: - Fix 2: notices stay readable
+    // MARK: - Notices stay readable
 
     func testFailureNoticeShowsAfterTheWordsLand() async {
         chooseCustomSpeech()
@@ -211,7 +212,7 @@ final class SessionReleaseTests: XCTestCase {
         await waitUntil { self.session.pillLog.last != nil && self.insertedAtPillCount >= 0 }
         // The insert happened first; the notice is the LAST pill state.
         XCTAssertGreaterThan(session.pillLog.count, self.insertedAtPillCount,
-                             "fix 2: the notice may not be stamped over by the result pill")
+                             "the notice may not be stamped over by the result pill")
         XCTAssertEqual(session.pillLog.last,
                        .error("Your speech service failed. Used Apple's words."))
         // And it appeared only once: no earlier pill already said it and got
@@ -267,7 +268,7 @@ final class SessionReleaseTests: XCTestCase {
         XCTAssertEqual(session.pillLog.last, .degraded)   // cleanup skipped for the model override
     }
 
-    // MARK: - Fix 3: cancel during upload closes Apple's session
+    // MARK: - Cancel during upload closes Apple's session too
 
     func testCancelDuringUploadClosesApplesSession() async {
         chooseCustomSpeech()
@@ -281,7 +282,7 @@ final class SessionReleaseTests: XCTestCase {
         session.processRelease(customChosen: true, silent: false, live: live)
         await waitUntil { live.finishStarted }         // wind-down racing the upload already
         session.cancel()
-        XCTAssertTrue(live.wasCancelled, "fix 3: Esc during an upload must end Apple's session too")
+        XCTAssertTrue(live.wasCancelled, "Esc during an upload must end Apple's session too")
         XCTAssertNil(session.recording, "and free the audio")
         try? await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertNil(self.insertedAfter, "a cancelled upload inserts nothing, even when it answers")

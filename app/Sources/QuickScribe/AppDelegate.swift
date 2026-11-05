@@ -152,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyIcon(animated: false, dimmed: cleanupDown)
     }
 
-    // MARK: - Permissions onboarding (brief AC6: requested once, clear)
+    // MARK: - Permissions onboarding (requested once, explained clearly)
 
     /// Accessibility can NEVER prompt (tccd: "Service kTCCServiceAccessibility
     /// does not allow prompting") — AXIsProcessTrustedWithOptions shows no

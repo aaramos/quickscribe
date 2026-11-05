@@ -19,13 +19,13 @@ TIMING (seconds per cleanup, median, service warm)
 
 Notes:
 - The service set needs no new limits: its refusal rate sits BELOW Apple's in
-  every mode, and no rate climbed above the reviewer's own Apple rerun
+  every mode, and no rate climbed above the earlier Apple rerun
   (12.0 / 24.0 / 24.0 / 18.0), so none is proposed.
 - Four reruns happened as the guard grew: after the currency rule, after
   the a.m./p.m. rule with dot folding, after per-number tying, and this one
   with free-standing markers, list shapes, suffix signs and added money
   words in. Apple's numbers have held at 10.0 / 22.0 / 24.0 / 18.0 across
-  the last three, exactly matching the reviewer's own Apple rerun band; the
+  the last three, exactly matching the earlier Apple rerun band; the
   service moves by one or two items per rerun between identical code, which
   is ordinary sampling for this model. The service's extra catches since the
   last table are all d05 and d22, and both are honest refusals: the answer
@@ -35,7 +35,7 @@ Notes:
   misfire appears in any row.
 - Inserted rows are, by construction, rows the per-number rules passed, and
   a search of this run's output found no symbol or marker the dictation had
-  not earned. Where the review's own wrong answers (a sign moved onto an
+  not earned. Where known wrong answers, built on purpose to test it (a sign moved onto an
   account number, a p.m. built from another hour's a.m., a marker read
   across a sentence break) are fed to the guard directly, every one is
   refused: those are the tests.

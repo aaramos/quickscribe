@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// Clipboard-restore insertion (brief §3, §9): snapshot the user's clipboard,
+/// Clipboard-restore insertion: snapshot the user's clipboard,
 /// write our text, synthesize ⌘V into the focused app, restore the clipboard.
 enum Insertion {
     struct Snapshot {

@@ -10,7 +10,7 @@ final class SessionController {
     enum Mode { case idle, pushToTalk, toggled }
 
     private(set) var mode: Mode = .idle
-    /// ⌃⌘⇧ hold: Rewrite for this session only (brief §4).
+    /// ⌃⌘⇧ hold: Rewrite for this session only.
     private var forcedRewrite = false
     var profile: String { forcedRewrite ? RefineMode.rewriteProfile : defaultProfile }
     /// The chosen default profile, kept across launches. Read when polish
@@ -38,7 +38,7 @@ final class SessionController {
     private var speechTask: Task<Void, Never>?
     /// How long the last utterance ran; feeds the Apple-route budget.
     var captureSeconds: Double = 0
-    /// hotkey-release: TTI starts here (brief §Speed). Internal so tests can
+    /// hotkey-release: the wait for time-to-insert starts here. Internal so tests can
     /// fix the release instant and watch who resets it.
     var releaseAt: Date?
     var insertOnce = false              // guarantees insert happens exactly once
@@ -261,7 +261,7 @@ final class SessionController {
     }
 
     /// What the whole recording gets used for. Kept pure so the rules the
-    /// card sets down are testable without a microphone.
+    /// app holds to are testable without a microphone.
     enum SpeechRoute: Equatable {
         case customService      // send the whole clip; its text becomes the result
         case appleOnly(String)  // why custom was refused, "" for the plain default

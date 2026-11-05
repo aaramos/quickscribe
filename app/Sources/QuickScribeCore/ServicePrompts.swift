@@ -3,7 +3,7 @@ import Foundation
 /// Factory prompts for cleanup that runs on the person's own service. Apple's
 /// short Polish prompt was tuned for Apple's model; a general instruction model
 /// does better with the longer text the old sidecar used. Ported from the
-/// sidecar prompts and the old Rewrite prompt at 79656ba, one change: an em
+/// sidecar prompts and the old Rewrite prompt as they stood, one change: an em
 /// dash in a rule became a colon, so nothing here shows an em dash on screen.
 public enum ServicePrompts {
     private static let fillerRule = #"- Remove all filler words and verbal tics: "um," "uh," "er," "ah," "you know," "like," "basically," "actually" (when used as a filler), "I mean," "sort of," "kind of.""#

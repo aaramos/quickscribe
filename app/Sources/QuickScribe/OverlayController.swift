@@ -51,7 +51,7 @@ final class OverlayController {
     }
 
     private static let height: CGFloat = 40
-    // The owner tunes the pill's size from these two lines.
+    // The pill's size is set from these two lines; change and rebuild.
     static let recordingHeight: CGFloat = 98
     static let maxWidth: CGFloat = 650
     /// What the one-line message can measure across: the pill's width less
@@ -275,7 +275,7 @@ final class WaveformView: NSView {
         }
     }
 
-    // The wave box: about a quarter larger all round, also for the owner to tune.
+    // The wave box: about a quarter larger all round; another tuning knob.
     static let waveWidth: CGFloat = 225
     static let waveHeight: CGFloat = 55
     override var intrinsicContentSize: NSSize { NSSize(width: Self.waveWidth, height: Self.waveHeight) }
@@ -286,7 +286,7 @@ final class WaveformView: NSView {
 
     /// Normal speech is far quieter than the mic's full range, so a straight reading barely
     /// registers. Ears hear loudness in decibels, so this maps the range speech really uses
-    /// onto the waves' full height. The two numbers are the owner's tuning knobs: the floor
+    /// onto the waves' full height. The two numbers are tuning knobs: the floor
     /// is where pauses go flat, the ceiling is where the top of a speaking voice sits.
     /// The ceiling came down from -22 dB so ordinary speech fills the taller waves.
     static let silenceFloorDb = -48.0

@@ -39,7 +39,7 @@ public struct OpenAICompatClient: Sendable {
     public var timeout: TimeInterval
     private let session: URLSession
 
-    /// One session for every client: later tickets build a client per
+    /// One session for every client: other callers build a client per
     /// dictation, and fresh sessions each time would throw away connection
     /// reuse. Ephemeral: no cookies or cache ever touch the disk.
     public static let sharedSession: URLSession = {
