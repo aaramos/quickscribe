@@ -481,12 +481,18 @@ final class SessionController {
             guard let self, self.generation == gen else { return }
             switch result {
             case .success(let output):
-                self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied, mode: prof))
+                let step = PolishPlanner.stepAfterModel(output: output, tidied: tidied, mode: prof)
+                if case .insert(_, cleaned: false) = step, PolishPlanner.usable(output),
+                   let refusal = CleanupGuard.refusal(output: output, input: tidied, mode: prof) {
+                    // The guard stamped a real answer, and a silent skip reads
+                    // as though nothing happened. Say which rule, briefly.
+                    self.pendingNotice = .cleanupFailed(Self.guardRefusalWhy(refusal))
+                }
+                self.carryOut(step)
             case .failure(let failure):
                 if route == .service {
                     // Never a lost word, but the person learns why the line
-                    // landed unpolished. Guard refusals stay quiet on purpose:
-                    // they are routine and the words are exactly the person's.
+                    // landed unpolished.
                     self.pendingNotice = .cleanupFailed(Self.cleanupFailureWhy(failure))
                 }
                 self.carryOut(PolishPlanner.stepAfterModel(output: nil, tidied: tidied, mode: prof))
@@ -506,6 +512,21 @@ final class SessionController {
     /// The short reason half of a cleanup notice. Deliberately NOT
     /// EndpointError.message: those carry detail (and the OS's own words)
     /// that belongs in Settings, not on a one-line pill.
+    /// Short stems, each one true of its rule: they share the cleanupFailed
+    /// tails, so "Your words went in." or the clipboard line follows them.
+    nonisolated static func guardRefusalWhy(_ refusal: CleanupGuard.Refusal) -> String {
+        switch refusal {
+        case .changedNumbers: return "Cleanup changed a number."
+        case .addedMoney: return "Cleanup added money."
+        case .addedTimeOfDay: return "Cleanup added a time of day."
+        case .answeredTheQuestion: return "Cleanup answered the question."
+        case .emptied: return "Cleanup gave nothing."
+        case .droppedTooMuch, .grewTooMuch, .rewordedTooMuch: return "Cleanup changed the wording."
+        case .addedASentence: return "Cleanup added words."
+        case .addedAName: return "Cleanup added a name."
+        }
+    }
+
     nonisolated static func cleanupFailureWhy(_ error: Error) -> String {
         if error is DeadlinePassed { return "Cleanup timed out." }
         if let e = error as? EndpointError {

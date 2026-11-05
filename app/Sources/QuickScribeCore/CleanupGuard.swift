@@ -28,27 +28,39 @@ public enum CleanupGuard {
         }
     }
 
-    public static func accepts(output rawOutput: String, input rawInput: String, mode: String) -> Bool {
-        guard digitsComeFromInput(output: rawOutput, input: rawInput) else { return false }
-        guard !inventsCurrency(output: rawOutput, input: rawInput) else { return false }
-        guard !inventsTimeOfDay(output: rawOutput, input: rawInput) else { return false }
+    /// Which rule stamped an answer, so the pill can say something true.
+    public enum Refusal: String, CaseIterable, Equatable, Sendable {
+        case changedNumbers, addedMoney, addedTimeOfDay, answeredTheQuestion, emptied,
+             droppedTooMuch, grewTooMuch, rewordedTooMuch, addedASentence, addedAName
+    }
+
+    /// The model's output only reaches the document if it passes every rule.
+    /// Returns nil when it passes, the broken rule's name otherwise.
+    public static func refusal(output rawOutput: String, input rawInput: String, mode: String) -> Refusal? {
+        guard digitsComeFromInput(output: rawOutput, input: rawInput) else { return .changedNumbers }
+        guard !inventsCurrency(output: rawOutput, input: rawInput) else { return .addedMoney }
+        guard !inventsTimeOfDay(output: rawOutput, input: rawInput) else { return .addedTimeOfDay }
         // Dots in am/pm must not read as brand-new words when the model restyled
         // "three pm" as "3 p.m."; both sides fold to the same tokens first.
         let output = foldTimeDots(rawOutput), input = foldTimeDots(rawInput)
         // A question that came back as a statement has been answered.
-        if input.contains("?"), !output.contains("?") { return false }
-        guard let limits = limits(mode) else { return true }
+        if input.contains("?"), !output.contains("?") { return .answeredTheQuestion }
+        guard let limits = limits(mode) else { return nil }
         // Numbers have their own check above, and "five five five" can rightly
         // become "555", so they don't count as words here.
         let given = words(input).filter(isNotNumber), produced = words(output).filter(isNotNumber)
-        guard !produced.isEmpty || given.isEmpty else { return false }
-        if Double(produced.count) < Double(given.count) * limits.minLength { return false }
-        if Double(produced.count) > Double(given.count) * limits.maxGrowth + limits.extraWords { return false }
+        guard !produced.isEmpty || given.isEmpty else { return .emptied }
+        if Double(produced.count) < Double(given.count) * limits.minLength { return .droppedTooMuch }
+        if Double(produced.count) > Double(given.count) * limits.maxGrowth + limits.extraWords { return .grewTooMuch }
         let known = Set(given)
         let new = produced.filter { !known.contains($0) }
-        if !produced.isEmpty, Double(new.count) / Double(produced.count) > limits.maxNewWords { return false }
-        if addsASentence(output: output, known: known, limit: limits.maxNewInSentence) { return false }
-        return !addsAName(output: output, known: known)
+        if !produced.isEmpty, Double(new.count) / Double(produced.count) > limits.maxNewWords { return .rewordedTooMuch }
+        if addsASentence(output: output, known: known, limit: limits.maxNewInSentence) { return .addedASentence }
+        return addsAName(output: output, known: known) ? .addedAName : nil
+    }
+
+    public static func accepts(output rawOutput: String, input rawInput: String, mode: String) -> Bool {
+        refusal(output: rawOutput, input: rawInput, mode: mode) == nil
     }
 
     /// The whole-text limits can't see one invented sentence in a long dictation, like

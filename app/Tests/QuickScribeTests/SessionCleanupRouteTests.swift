@@ -148,15 +148,18 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertTrue(notice.contains("Wrong service path."), notice)
     }
 
-    func testGuardRejectionOnTheServiceRouteStaysQuietAndLosesNothing() async {
+    func testGuardRejectionSaysWhyInThePillAndLosesNothing() async {
         chooseServiceCleanup()
-        // A reply with an invented number: the same guard Apple's route uses
-        // must stamp on it, falling back to the person's tidied words, quietly.
+        // A reply with an invented number: the guard stamps, the person's own
+        // tidied words go in, and the pill says which rule fired instead of
+        // passing the skip in silence.
         service.queue(service.text(qsSSE("The invoice is 9999 due Friday.")),
                       forPath: "/v1/chat/completions")
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.")
-        XCTAssertEqual(session.pillLog.last, .degraded)
+        guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
+        XCTAssertTrue(notice.contains("Cleanup changed a number."), notice)
+        XCTAssertTrue(notice.contains("Your words went in."), notice)
     }
 
     func testAppleRouteStillUsesTheShortAppleSet() async {
@@ -229,7 +232,7 @@ final class SessionCleanupRouteTests: XCTestCase {
     /// show. If this fails, the notice must be reworded, not the pill widened.
     func testEveryNoticeFitsThePill() {
         let font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
-        let notices: [SessionController.SessionNotice] = [
+        var notices: [SessionController.SessionNotice] = [
             .reason("Over the 5-minute limit. Apple speech answered."),
             .reason("The clip came out empty. Apple speech answered."),
             .speechFellBack,
@@ -241,6 +244,10 @@ final class SessionCleanupRouteTests: XCTestCase {
             .cleanupFailed(SessionController.cleanupFailureWhy(EndpointError.truncated)),
             .cleanupFailed(SessionController.cleanupFailureWhy(NSError(domain: "x", code: 1))),
         ]
+        let refused: [SessionController.SessionNotice] = CleanupGuard.Refusal.allCases.map {
+            .cleanupFailed(SessionController.guardRefusalWhy($0))
+        }
+        notices = notices + refused
         for notice in notices {
             for copied in [false, true] {
                 let text = notice.display(copied: copied)
