@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import QuickScribeCore
 
@@ -192,6 +193,26 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertFalse(settings.language.isEmpty, "custom speech follows the Mac's language, it is never blank")
         XCTAssertTrue(req.body.range(of: wav) != nil, "the clip itself must be in the body")
         XCTAssertEqual(req.headers["authorization"], "Bearer test-key-local")
+    }
+
+    /// The ticket's path in miniature: captured buffers become a whole WAV and
+    /// reach the service as the upload file, in the app's own multipart shape.
+    func testWholeRecordingUploadsAsTheTranscriptionFile() async throws {
+        service.queue(service.text(#"{"text":"fourteen hundred fifty"}"#), forPath: "/v1/audio/transcriptions")
+        let rec = RecordingBuffer()
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+        for _ in 0..<4 {                       // 0.4 s across four capture callbacks
+            let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800)!
+            b.frameLength = 4_800
+            rec.append(b)
+        }
+        let (clip, overflowed) = rec.wav()
+        XCTAssertFalse(overflowed)
+        let text = try await client.transcribe(wav: clip, model: "speechy")
+        XCTAssertEqual(text, "fourteen hundred fifty")
+        let req = try XCTUnwrap(service.lastRequest)
+        XCTAssertEqual(req.path, "/v1/audio/transcriptions")
+        XCTAssertTrue(req.body.range(of: clip) != nil, "the whole clip must arrive as one file, unchanged")
     }
 
     func testTranscriptionEmptyReplyAndBadJSON() async throws {
