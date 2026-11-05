@@ -54,8 +54,6 @@ final class OverlayController {
     // The owner tunes the pill's size from these two lines.
     static let recordingHeight: CGFloat = 98
     static let maxWidth: CGFloat = 650
-    /// What a single message line has to fit in at the pill's font: the panel
-    /// max minus the row's padding. Notices are written to this budget.
     /// What the one-line message can measure across: the pill's width less
     /// its padding. With maxWidth up to 650 this grows with it automatically.
     static let messageTextBudget: CGFloat = maxWidth - 60

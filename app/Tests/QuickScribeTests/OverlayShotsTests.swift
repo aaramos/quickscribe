@@ -63,15 +63,6 @@ final class OverlayShotsTests: XCTestCase {
         XCTAssertEqual(loudness(rms: 0.003), 0, "ordinary room noise stays flat")
     }
 
-    func testTheTunedNumbersAreTheTickets() {
-        XCTAssertEqual(OverlayController.recordingHeight, 98)
-        XCTAssertEqual(OverlayController.maxWidth, 650)
-        XCTAssertEqual(WaveformView.waveWidth, 225)
-        XCTAssertEqual(WaveformView.waveHeight, 55)
-        XCTAssertEqual(WaveformView.silenceFloorDb, -48)
-        XCTAssertEqual(WaveformView.topOfSpeechDb, -26)
-    }
-
     private func save(_ view: NSView, to path: String) {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)

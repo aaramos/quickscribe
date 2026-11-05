@@ -509,9 +509,6 @@ final class SessionController {
                                model: settings.cleanupModel)
     }
 
-    /// The short reason half of a cleanup notice. Deliberately NOT
-    /// EndpointError.message: those carry detail (and the OS's own words)
-    /// that belongs in Settings, not on a one-line pill.
     /// Short stems, each one true of its rule: they share the cleanupFailed
     /// tails, so "Your words went in." or the clipboard line follows them.
     nonisolated static func guardRefusalWhy(_ refusal: CleanupGuard.Refusal) -> String {
@@ -527,6 +524,9 @@ final class SessionController {
         }
     }
 
+    /// The short reason half of a cleanup notice. Deliberately NOT
+    /// EndpointError.message: those carry detail (and the OS's own words)
+    /// that belongs in Settings, not on a one-line pill.
     nonisolated static func cleanupFailureWhy(_ error: Error) -> String {
         if error is DeadlinePassed { return "Cleanup timed out." }
         if let e = error as? EndpointError {
