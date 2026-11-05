@@ -1,6 +1,16 @@
 import AVFoundation
 import Foundation
 
+/// What the session controller needs from a live recognizer. A stub can drive
+/// the release path in tests without Apple's models.
+public protocol SpeechAccepting: Sendable {
+    func append(_ buffer: AVAudioPCMBuffer)
+    func finish() async throws -> String
+    func cancel()
+}
+
+extension LiveTranscription: SpeechAccepting {}
+
 /// Connects the microphone to Apple's recognizer. Capture has to start the instant
 /// the hotkey fires, but the recognizer takes a moment to come up, so early audio
 /// waits here and goes in first. No words are lost to that startup gap.
