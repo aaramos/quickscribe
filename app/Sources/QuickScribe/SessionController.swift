@@ -130,16 +130,11 @@ final class SessionController {
     }
 
     var isRecording: Bool { mode != .idle }
-    /// While the pill shows recorded words arriving or being worked on, the
-    /// pill belongs to the dictation: an outside notice must not take it
-    /// away. Recording sets this the same tick the hotkey does; it clears
-    /// when the words are home (or cancelled), which is "finishing" too.
-    var pillBelongsToDictation: Bool {
-        switch overlay.state {
-        case .recording, .processing: return true
-        default: return false
-        }
-    }
+    /// The pill is free only when nothing is on it. Any state, dictation or
+    /// not, means someone may be reading it: a permission warning carries
+    /// no hide timer and must never be replaced and hidden under their
+    /// eyes. Outside notices wait for a genuinely empty pill.
+    var pillIsFree: Bool { overlay.state == .hidden }
 
     /// Gets both Apple models ready so the first dictation isn't the slow one. A
     /// missing speech model downloads through the OS here.

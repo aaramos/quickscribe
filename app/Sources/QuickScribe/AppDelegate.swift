@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch answer {
             case .newer(let version, let page):
                 self.availableUpdate = (version, page)
-                let busy = self.session.pillBelongsToDictation
+                let busy = !self.session.pillIsFree
                 if let notice = Self.updateNotice(answer,
                                                   lastNotified: UserDefaults.standard
                                                       .string(forKey: Self.updateNotifiedKey),
@@ -97,12 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// A notice landing on the pill during a dictation buries the words the
-    /// person is watching and hides before anyone can read it. So while the
-    /// session is recording or finishing: nothing on the pill, and the
-    /// version is NOT marked as told, so a later check gets its turn at a
-    /// quiet moment. The menu item still appears now; a menu opens when the
-    /// person chooses, interrupting nothing.
+    /// A notice only goes on an empty pill. It would otherwise bury whatever
+    /// the person is reading, dictation or a permission warning alike, and
+    /// hide again before anyone could. A skipped notice is not a told one:
+    /// the version stays unmarked so a later check announces into a quiet
+    /// screen. The menu item still appears now; a menu opens when the person
+    /// chooses, interrupting nothing.
     nonisolated static func updateNotice(_ answer: UpdateChecker.Check, lastNotified: String?,
                                          sessionBusy: Bool) -> String? {
         guard !sessionBusy else { return nil }
