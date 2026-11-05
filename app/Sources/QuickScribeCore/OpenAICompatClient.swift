@@ -89,8 +89,6 @@ public struct OpenAICompatClient: Sendable {
         if let urlError = transport as? URLError {
             switch urlError.code {
             case .timedOut: return .timedOut
-            case .cannotConnectToHost, .networkConnectionLost, .cannotFindHost, .notConnectedToInternet:
-                return .notReached(urlError.localizedDescription)
             default: return .notReached(urlError.localizedDescription)
             }
         }
@@ -113,8 +111,8 @@ public struct OpenAICompatClient: Sendable {
         do {
             let url = try base.appendingPathComponent("models")
             let (data, response) = try await session.data(for: request(to: url))
-            guard let http = response as? HTTPURLResponse,
-                  http.statusCode != 404 else { throw EndpointError.notFound("models") }
+            // One place decides what each status means; classify answers 404 too.
+            guard let http = response as? HTTPURLResponse else { throw EndpointError.notFound("models") }
             if let failure = Self.classify(status: http.statusCode, transport: nil, what: "models") {
                 throw failure
             }
