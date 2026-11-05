@@ -57,7 +57,8 @@ final class SessionController {
     var textInserter: (String, @escaping (Bool, Bool) -> Void) -> Void = { Insertion.insert($0, completion: $1) }
     var copyWriter: (String) -> Bool = { Insertion.copy($0) }
     var pasteKept: (String) -> Bool = { Insertion.pasteAndKeep($0) }
-    var cleaner: any Cleaning = AppleCleaner()
+    /// Overrides the cleaner both routes, so tests see the choice around it.
+    var cleaner: (any Cleaning)?
     var appleModelReadyOverride: Bool?
     /// Overrides the "the mic heard nothing all session" reading, which is
     /// always true while no real capture ever ran (tests drive releases).
@@ -410,27 +411,74 @@ final class SessionController {
 
     // MARK: - Cleanup + insert
 
+    /// Whose model cleans this dictation. Custom cleanup only counts with an
+    /// address set, same rule as speech.
+    nonisolated static func cleanupRoute(settings: EndpointSettings) -> CleanupRoute {
+        settings.cleanupUsesEndpoint ? .service : .apple
+    }
+
     private func polishAndInsert(raw: String) {
         let gen = generation
         let prof = profile
+        let settings = endpointStore.load()
+        let route = Self.cleanupRoute(settings: settings)
         let spent = releaseAt.map { clock().timeIntervalSince($0) } ?? 0
+        // Apple's model only gates Apple's route. A service route always
+        // asks: its own failures fall back below, budgeted the same way.
+        let modelReady = route == .service || (appleModelReadyOverride ?? (AppleCleaner.unavailableReason() == nil))
         let step = PolishPlanner.firstStep(raw: raw, tidied: TextCleanup.tidy(raw),
-                                           modelReady: appleModelReadyOverride ?? (AppleCleaner.unavailableReason() == nil),
+                                           modelReady: modelReady,
                                            budget: AppInfo.ttiBudget(utteranceSeconds: captureSeconds),
                                            spent: spent)
         guard case .askModel(let timeout, let tidied) = step else {
             carryOut(step)
             return
         }
-        let instructions = prompts.prompt(prof)
-        let cleaner = cleaner
+        // The person's own prompt applies to both routes; the factory texts
+        // differ: Apple's short tuned set, or the longer sidecar set.
+        let instructions = prompts.prompt(prof, route: route)
+        let cleaner = cleaner ?? activeCleaner(settings: settings, route: route)
         Task { [weak self] in
-            let output = try? await withDeadline(timeout) {
-                try await cleaner.clean(tidied, instructions: instructions)
+            let result: Result<String, Error>
+            do {
+                result = .success(try await withDeadline(timeout) {
+                    try await cleaner.clean(tidied, instructions: instructions)
+                })
+            } catch {
+                result = .failure(error)
             }
             guard let self, self.generation == gen else { return }
-            self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied, mode: prof))
+            switch result {
+            case .success(let output):
+                self.carryOut(PolishPlanner.stepAfterModel(output: output, tidied: tidied, mode: prof))
+            case .failure(let failure):
+                if route == .service {
+                    // Never a lost word, but the person learns why the line
+                    // landed unpolished. Guard refusals stay quiet on purpose:
+                    // they are routine and the words are exactly the person's.
+                    self.pendingNotice = Self.cleanupFailureNotice(failure)
+                }
+                self.carryOut(PolishPlanner.stepAfterModel(output: nil, tidied: tidied, mode: prof))
+            }
         }
+    }
+
+    /// The route's own cleaner. The Keychain is read here and only for the
+    /// service route: an Apple cleanup never touches it.
+    private func activeCleaner(settings: EndpointSettings, route: CleanupRoute) -> any Cleaning {
+        guard route == .service else { return appleCleaner }
+        return EndpointCleaner(client: OpenAICompatClient(settings: settings,
+                                                          apiKey: endpointStore.apiKey(), timeout: 120),
+                               model: settings.cleanupModel)
+    }
+
+    /// A plain sentence: what went wrong, and that nothing was lost.
+    nonisolated static func cleanupFailureNotice(_ error: Error) -> String {
+        let why: String
+        if error is DeadlinePassed { why = "Your cleanup service did not answer in time." }
+        else if let e = error as? EndpointError { why = e.message }
+        else { why = "Your cleanup service failed." }
+        return "\(why) Your words were inserted as typed."
     }
 
     private func carryOut(_ step: PolishPlanner.Step) {
