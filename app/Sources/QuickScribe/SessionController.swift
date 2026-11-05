@@ -27,16 +27,21 @@ final class SessionController {
     private let prompts: PromptLibrary
     private let endpointStore: EndpointSettingsStore
     private let appleCleaner = AppleCleaner()
-    private var transcription: (any SpeechAccepting)?
-    /// The whole recording for a custom speech service. Rebuilt every session
-    /// so buffers from a discarded one can never leak into the next.
-    private var recording = RecordingBuffer()
+    /// The live recognizer for this session. start() installs the real one;
+    /// tests attach a stub here so cancel() reaches it.
+    var transcription: (any SpeechAccepting)?
+    /// The whole recording, and it exists only when speech points at a
+    /// service: an Apple-speech session must not pay for an audio copy, a
+    /// conversion and a WAV it will never send. Rebuilt every session so
+    /// buffers from a discarded one can never leak into the next.
+    private(set) var recording: RecordingBuffer?
     private var speechTask: Task<Void, Never>?
     private var captureSeconds: Double = 0
-    private var releaseAt: Date?           // hotkey-release: TTI starts here (brief §Speed)
+    /// hotkey-release: TTI starts here (brief §Speed). Internal so tests can
+    /// fix the release instant and watch who resets it.
+    var releaseAt: Date?
     private var insertOnce = false              // guarantees insert happens exactly once
-    private var generation = 0                  // invalidates in-flight work after cancel
-
+    private(set) var generation = 0             // invalidates in-flight work after cancel
     // MARK: - Test seams
     // The paths below reach the keyboard, the clipboard, Apple's model and
     // the clock, so every one of those sits behind a replaceable seam. The
@@ -175,13 +180,13 @@ final class SessionController {
             }
         }
         transcription = live
-        // A fresh buffer every session: audio from a cancelled one must never
-        // reach the next dictation.
-        recording = RecordingBuffer()
+        // Only a session whose speech route is the service keeps the whole
+        // recording; Apple speech needs nothing beyond the live recognizer.
+        armRecording()
         let whole = recording
         capture.onBuffer = { buffer in
             live.append(buffer)
-            whole.append(buffer)
+            whole?.append(buffer)
         }
 
         do {
@@ -204,6 +209,12 @@ final class SessionController {
         overlay.resetLevels()
         pill(.recording(mode: RefineMode.title(forProfile: profile)))   // same tick as the hotkey, so it feels instant
         onPhaseChange?(true)
+    }
+
+    /// start()'s buffer decision, split out so tests can watch both routes
+    /// without a microphone.
+    func armRecording() {
+        recording = endpointStore.load().speechUsesEndpoint ? RecordingBuffer() : nil
     }
 
     /// What the whole recording gets used for. Kept pure so the rules the
@@ -230,65 +241,90 @@ final class SessionController {
         capture.onBuffer = nil
         pill(.processing)
         onPhaseChange?(false)
-        let gen = generation
         guard let live = transcription else { return }
-        transcription = nil
-        let clip = recording.wav()          // waits for every buffer already in flight
-        recording.clear()                   // the recording is only needed until here
+        // transcription is deliberately kept: pressing Esc while the result
+        // lands must still close Apple's session; cancel() does that through
+        // abandonTranscription. The next start() replaces the object anyway.
+        processRelease(customChosen: recording != nil,
+                       silent: capture.sessionWasFullySilent,
+                       live: live)
+    }
+
+    /// Everything release does with the words: who answers, in what order,
+    /// and when the cleanup budget starts. No hardware in here, so tests
+    /// drive it directly with a stub recognizer and a fake service.
+    func processRelease(customChosen: Bool, silent: Bool, live: any SpeechAccepting) {
+        let gen = generation
+        let clip = recording?.wav()       // waits for every buffer already in flight
+        recording?.discard()              // discard, not clear: a late buffer must not grow it back
+        recording = nil
         let settings = endpointStore.load()
-        let route = Self.speechRoute(customChosen: settings.speechUsesEndpoint,
-                                     overflowed: clip.overflowed,
-                                     silent: capture.sessionWasFullySilent,
-                                     hasClip: clip.data.count > 44)
-        let endpoint = OpenAICompatClient(settings: settings, apiKey: endpointStore.apiKey(), timeout: 120)
+        let route = Self.speechRoute(customChosen: customChosen,
+                                     overflowed: clip?.overflowed ?? false,
+                                     silent: silent,
+                                     hasClip: (clip?.data.count ?? 0) > 44)
+        if case .appleOnly(let why) = route {
+            speechTask = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.generation == gen { self.speechTask = nil } }   // never drop a newer session's task
+                do {
+                    let raw = try await live.finish()   // wind-down started at release; this only waits
+                    guard self.generation == gen else { return }
+                    if !why.isEmpty {
+                        self.pill(.error(why), autoHideAfter: 3.5)
+                    }
+                    self.resolveFinalText(raw, generation: gen)
+                } catch {
+                    guard self.generation == gen else { return }
+                    self.transcriptionFailed(error, generation: gen)
+                }
+            }
+            return
+        }
+        guard let bytes = clip?.data else { return }
+        // Apple's session starts winding down here, beside the upload: a good
+        // service reply never waits on it, and if it hangs, it still does not.
+        let windDown = Task { () -> String? in try? await live.finish() }
         speechTask = Task { [weak self] in
             guard let self else { return }
-
-            // Apple's live words: the answer for the Apple route and the
-            // fallback whenever the service fails.
-            func appleWords() async -> String? {
-                try? await live.finish()
-            }
-
-            if case .customService = route {
-                do {
-                    let text = try await endpoint.transcribe(wav: clip.data, model: settings.speechModel)
-                    if text.isEmpty { throw EndpointError.emptyReply }   // answered with nothing: same as a failure
-                    guard generation == gen, !Task.isCancelled else { return }  // cancelled: cancel() already wound everything down
-                    _ = await appleWords()          // wind Apple's session down; its words unused
-                    // Cleanup's budget starts when the words are in hand:
-                    // speech time is its own clock, 120 s for a model that loads on first use.
-                    releaseAt = Date()
-                    resolveFinalText(text, generation: gen)
-                } catch {
-                    guard generation == gen, !Task.isCancelled else { return }
-                    NSLog("QuickScribe: custom speech failed: \(error.localizedDescription)")
-                    let fallback = await appleWords()
-                    guard generation == gen else { return }
-                    if let fallback, !fallback.isEmpty {
-                        pill(.error("Your speech service failed. Used Apple's words."), autoHideAfter: 3.0)
-                        resolveFinalText(fallback, generation: gen)
-                    } else {
-                        pill(.error("Your speech service failed, and Apple speech gave no words either."),
-                                     autoHideAfter: 3.5)
-                    }
-                }
-                return
-            }
-            // Apple route: exactly the old behavior, plus the limit notice.
+                defer { if self.generation == gen { self.speechTask = nil } }   // never drop a newer session's task
             do {
-                let raw = try await live.finish()
-                guard generation == gen else { return }
-                if case .appleOnly(let why) = route, !why.isEmpty {
-                    pill(.error(why), autoHideAfter: 3.5)
-                }
-                resolveFinalText(raw, generation: gen)
+                // The key is read from the Keychain only for the route that
+                // actually sends anything.
+                let endpoint = OpenAICompatClient(settings: settings, apiKey: self.endpointStore.apiKey(), timeout: 120)
+                let raw = try await endpoint.transcribe(wav: bytes, model: settings.speechModel)
+                let words = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if words.isEmpty { throw EndpointError.emptyReply }   // blank is no words
+                guard self.generation == gen, !Task.isCancelled else { return }
+                // Cleanup's budget starts when the words are in hand. The
+                // upload got its own 120 s; it spends none of this one.
+                self.releaseAt = self.clock()
+                self.resolveFinalText(words, generation: gen)
             } catch {
-                guard generation == gen else { return }
-                transcriptionFailed(error, generation: gen)
+                guard self.generation == gen, !Task.isCancelled else { return }
+                NSLog("QuickScribe: custom speech failed: \(error.localizedDescription)")
+                // The fallback needs Apple's words, but a stuck Apple session
+                // must not hang a dictation that already lost once.
+                let fallback: String? = ((try? await withDeadline(Self.appleFallbackGrace) { await windDown.value }) ?? nil)
+                // withDeadline abandons, never waits for, a stuck recognizer:
+                // a dictation that already lost once must not hang as well.
+                guard self.generation == gen else { return }
+                let words = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if words.isEmpty {
+                    self.pill(.error("Your speech service failed, and Apple speech gave no words either."),
+                              autoHideAfter: 3.5)
+                } else {
+                    self.pill(.error("Your speech service failed. Used Apple's words."), autoHideAfter: 3.0)
+                    self.releaseAt = self.clock()   // the failed upload spends none of it
+                    self.resolveFinalText(fallback ?? "", generation: gen)
+                }
             }
         }
     }
+
+    /// How long the service-failure fallback waits on Apple's session before
+    /// giving up on it. A stuck recognizer must not stack onto a stuck service.
+    static var appleFallbackGrace: TimeInterval = 5.0
 
     func cancel() {
         guard mode != .idle || overlay.state == .processing else { return }
@@ -299,7 +335,7 @@ final class SessionController {
         abandonTranscription()
         speechTask?.cancel()          // stop the upload outright
         speechTask = nil
-        recording.discard()           // and free the audio
+        recording?.discard()          // and free the audio
         insertOnce = true             // a late finish must not insert anymore
         pill(.cancelled, autoHideAfter: 1.2)
         onPhaseChange?(false)
