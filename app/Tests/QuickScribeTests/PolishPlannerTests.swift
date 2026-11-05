@@ -41,4 +41,20 @@ final class PolishPlannerTests: XCTestCase {
         let rewrite = "Revenue is down 8 percent, and I think it's mostly because of the pricing change we did in March. We should probably talk about whether to roll that back."
         XCTAssertEqual(PolishPlanner.stepAfterModel(output: rewrite, tidied: said, mode: "rewrite"), .insert(rewrite, cleaned: true))
     }
+    func testServiceGetsItsOwnFlatDeadlineWhileAppleKeepsTheBudget() {
+        // Apple's route: the shrinking figure, unchanged.
+        XCTAssertEqual(PolishPlanner.firstStep(raw: "go", tidied: "go", modelReady: true, budget: 1.5, spent: 0),
+                       .askModel(timeout: 1.5, tidied: "go"))
+        XCTAssertEqual(PolishPlanner.firstStep(raw: "go", tidied: "go", modelReady: true, budget: 1.5, spent: 1.0),
+                       .askModel(timeout: 0.5, tidied: "go"))
+        XCTAssertEqual(PolishPlanner.firstStep(raw: "go", tidied: "go", modelReady: true, budget: 1.5, spent: 2.0),
+                       .insert("go", cleaned: false), "Apple stops asking once the budget is spent")
+        // Service route: flat 6.0 at every clip length, even past Apple's budget.
+        for (budget, spent) in [(1.5, 0.0), (5.0, 1.0), (10.0, 9.9), (1.5, 2.0)] {
+            XCTAssertEqual(PolishPlanner.firstStep(raw: "go", tidied: "go", modelReady: true,
+                                                   budget: budget, spent: spent, serviceTimeout: 6.0),
+                           .askModel(timeout: 6.0, tidied: "go"), "\(budget)/\(spent)")
+        }
+    }
+
 }

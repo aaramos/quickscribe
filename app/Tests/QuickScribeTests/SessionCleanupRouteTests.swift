@@ -8,25 +8,6 @@ import XCTest
 /// the pure route choice and the failure wording it feeds to the person.
 @MainActor
 final class SessionCleanupRouteTests: XCTestCase {
-    func testRouteFollowsTheSettingNotJustTheAddress() {
-        XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(address: "http://127.0.0.1:1234/v1",
-                                                                                 useCustomCleanup: true)), .service)
-        XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(address: "http://127.0.0.1:1234/v1")), .apple,
-                       "an address alone keeps Apple")
-        XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(useCustomCleanup: true)), .apple,
-                       "Custom without an address stays Apple")
-    }
-
-    func testFailureNoticesArePlainAndTellYouNothingWasLost() {
-        let key = SessionController.cleanupFailureNotice(EndpointError.unauthorized)
-        XCTAssertTrue(key.contains("refused the key"), key)
-        XCTAssertTrue(key.hasSuffix("Your words were inserted as typed."), key)
-        let time = SessionController.cleanupFailureNotice(DeadlinePassed())
-        XCTAssertTrue(time.contains("did not answer in time"), time)
-        let other = SessionController.cleanupFailureNotice(NSError(domain: "x", code: 1))
-        XCTAssertTrue(other.contains("cleanup service failed"), other)
-        for n in [key, time, other] { XCTAssertFalse(n.contains("\u{2014}"), n) }
-    }
 
     private var session: SessionController!
     private var service: FakeService!
@@ -73,6 +54,7 @@ final class SessionCleanupRouteTests: XCTestCase {
     override func tearDown() {
         service.stop()
         defaults.removePersistentDomain(forName: suite)
+        SessionController.serviceCleanupTimeout = 6.0
     }
 
     private func chooseServiceCleanup() {
@@ -89,6 +71,24 @@ final class SessionCleanupRouteTests: XCTestCase {
         }
     }
 
+    func testRouteFollowsTheSettingNotJustTheAddress() {
+        XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(address: "http://127.0.0.1:1234/v1",
+                                                                                 useCustomCleanup: true)), .service)
+        XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(address: "http://127.0.0.1:1234/v1")), .apple,
+                       "an address alone keeps Apple")
+        XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(useCustomCleanup: true)), .apple,
+                       "Custom without an address stays Apple")
+    }
+    func testFailureNoticesArePlainAndTellYouNothingWasLost() {
+        let key = SessionController.cleanupFailureNotice(EndpointError.unauthorized)
+        XCTAssertTrue(key.contains("refused the key"), key)
+        XCTAssertTrue(key.hasSuffix("Your words were inserted as typed."), key)
+        let time = SessionController.cleanupFailureNotice(DeadlinePassed())
+        XCTAssertTrue(time.contains("did not answer in time"), time)
+        let other = SessionController.cleanupFailureNotice(NSError(domain: "x", code: 1))
+        XCTAssertTrue(other.contains("cleanup service failed"), other)
+        for n in [key, time, other] { XCTAssertFalse(n.contains("\u{2014}"), n) }
+    }
     func testServiceCleanupReceivesTheServicePromptAndKeepsTheReply() async throws {
         chooseServiceCleanup()
         let cleaned = "The invoice is 1200 due Friday"   // minus the period: a real edit the guard allows
@@ -105,7 +105,6 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertEqual(session.pillLog.last, .inserted, "a service reply is a clean cleanup, not degraded")
         XCTAssertEqual(secrets.reads, 1, "the key is read for the route that uses it")
     }
-
     func testServiceCleanupFailureFallsBackToTidiedWordsAndSaysWhy() async {
         chooseServiceCleanup()
         service.queue(service.text("nope", status: 500), forPath: "/v1/chat/completions")
@@ -115,7 +114,6 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertTrue(notice.contains("code 500"), notice)
         XCTAssertTrue(notice.contains("inserted as typed"), notice)
     }
-
     func testUnreachableAddressGivesAClearMessageAndKeepsTheWords() async {
         store.save(EndpointSettings(address: "http://127.0.0.1:9/v1", cleanupModel: "tidier",
                                     useCustomCleanup: true))
@@ -124,7 +122,6 @@ final class SessionCleanupRouteTests: XCTestCase {
         guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
         XCTAssertTrue(notice.contains("Could not reach the address."), notice)
     }
-
     func testWrongKeyNamesTheKey() async {
         chooseServiceCleanup()
         service.queue(service.text("denied", status: 401), forPath: "/v1/chat/completions")
@@ -133,7 +130,6 @@ final class SessionCleanupRouteTests: XCTestCase {
         guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
         XCTAssertTrue(notice.contains("refused the key"), notice)
     }
-
     func testGuardRejectionOnTheServiceRouteStaysQuietAndLosesNothing() async {
         chooseServiceCleanup()
         // A reply with an invented number: the same guard Apple's route uses
@@ -144,7 +140,6 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.")
         XCTAssertEqual(session.pillLog.last, .degraded)
     }
-
     func testAppleRouteStillUsesTheShortAppleSet() async {
         final class Note: Cleaning, @unchecked Sendable {
             private let lock = NSLock()
@@ -162,7 +157,6 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertEqual(note.instructions, library.prompt(session.profile, route: .apple))
         XCTAssertEqual(secrets.reads, 0, "the Apple cleanup route never reads the Keychain")
     }
-
     func testRewriteRunsOnBothRoutes() async throws {
         // The ⌃⌘⇧ profile over the service: FactoryPrompts.rewrite's text is
         // what the old sidecar sent, so it must arrive as a system prompt.
@@ -176,6 +170,38 @@ final class SessionCleanupRouteTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: req.body) as? [String: Any])
         let messages = try XCTUnwrap(json["messages"] as? [[String: String]])
         XCTAssertEqual(messages[0]["content"], ServicePrompts.rewrite)
+    }
+    func testServiceAnswerPastApplesBudgetWindowIsStillUsedUpToItsOwnDeadline() async {
+        // A 5 s clip leaves Apple's planner 0.1 s here; the answer takes 0.3 s
+        // and lands. The service runs on the flat deadline, not the leftover.
+        chooseServiceCleanup()
+        session.captureSeconds = 5
+        session.clock = { self.base.addingTimeInterval(2.4) }
+        service.queue(service.text(qsSSE("The invoice is 1200 due Friday"), delay: 0.3),
+                      forPath: "/v1/chat/completions")
+        await runRelease()
+        XCTAssertEqual(inserted, "The invoice is 1200 due Friday")
+    }
+    func testServiceAnswerSlowerThanTheFlatDeadlineFallsBackWithANotice() async {
+        let saved = SessionController.serviceCleanupTimeout
+        SessionController.serviceCleanupTimeout = 0.2
+        defer { SessionController.serviceCleanupTimeout = saved }
+        chooseServiceCleanup()
+        service.queue(service.text(qsSSE("late words"), delay: 0.6), forPath: "/v1/chat/completions")
+        await runRelease()
+        XCTAssertEqual(inserted, "The invoice is 1200 due Friday.", "past the limit, the words are the person's own")
+        guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
+        XCTAssertTrue(notice.contains("did not answer in time"), notice)
+    }
+    func testSpentBudgetStillAsksTheService() async {
+        // Apple's planner stops asking once its budget is gone; a service has
+        // its own window, so the request must still leave the Mac.
+        chooseServiceCleanup()
+        session.clock = { self.base.addingTimeInterval(9.9) }   // 9.9 s past a 10 s clip's release
+        service.queue(service.text(qsSSE("The invoice is 1200 due Friday")), forPath: "/v1/chat/completions")
+        await runRelease()
+        XCTAssertEqual(inserted, "The invoice is 1200 due Friday")
+        XCTAssertNotNil(service.received.first { $0.path == "/v1/chat/completions" })
     }
 }
 

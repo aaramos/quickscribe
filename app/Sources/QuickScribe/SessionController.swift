@@ -36,7 +36,8 @@ final class SessionController {
     /// buffers from a discarded one can never leak into the next.
     private(set) var recording: RecordingBuffer?
     private var speechTask: Task<Void, Never>?
-    private var captureSeconds: Double = 0
+    /// How long the last utterance ran; feeds the Apple-route budget.
+    var captureSeconds: Double = 0
     /// hotkey-release: TTI starts here (brief §Speed). Internal so tests can
     /// fix the release instant and watch who resets it.
     var releaseAt: Date?
@@ -57,6 +58,11 @@ final class SessionController {
     var textInserter: (String, @escaping (Bool, Bool) -> Void) -> Void = { Insertion.insert($0, completion: $1) }
     var copyWriter: (String) -> Bool = { Insertion.copy($0) }
     var pasteKept: (String) -> Bool = { Insertion.pasteAndKeep($0) }
+    /// Custom cleanup's own deadline, flat at every clip length: a service may
+    /// be loading a model or answering from across the room, and Apple's
+    /// per-length budget was tuned for a model that is always warm on device.
+    static var serviceCleanupTimeout: TimeInterval = 6.0
+
     /// Overrides the cleaner both routes, so tests see the choice around it.
     var cleaner: (any Cleaning)?
     var appleModelReadyOverride: Bool?
@@ -429,7 +435,8 @@ final class SessionController {
         let step = PolishPlanner.firstStep(raw: raw, tidied: TextCleanup.tidy(raw),
                                            modelReady: modelReady,
                                            budget: AppInfo.ttiBudget(utteranceSeconds: captureSeconds),
-                                           spent: spent)
+                                           spent: spent,
+                                           serviceTimeout: route == .service ? Self.serviceCleanupTimeout : nil)
         guard case .askModel(let timeout, let tidied) = step else {
             carryOut(step)
             return

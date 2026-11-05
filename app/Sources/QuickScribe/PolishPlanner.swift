@@ -14,10 +14,17 @@ enum PolishPlanner {
         case insert(String, cleaned: Bool)
     }
 
-    static func firstStep(raw: String, tidied: String, modelReady: Bool, budget: Double, spent: TimeInterval) -> Step {
+    /// `serviceTimeout` marks the custom cleanup route: a service answers over
+    /// the network and may be loading its model, so it gets a flat deadline of
+    /// its own at every clip length instead of Apple's shrinking budget.
+    /// Apple's route passes nil and keeps the budget math untouched.
+    static func firstStep(raw: String, tidied: String, modelReady: Bool, budget: Double, spent: TimeInterval,
+                          serviceTimeout: TimeInterval? = nil) -> Step {
         guard !tidied.isEmpty else { return .insert(raw, cleaned: false) }
+        guard modelReady else { return .insert(tidied, cleaned: false) }
+        if let serviceTimeout { return .askModel(timeout: serviceTimeout, tidied: tidied) }
         let remaining = budget - spent
-        guard modelReady, remaining > 0 else { return .insert(tidied, cleaned: false) }
+        guard remaining > 0 else { return .insert(tidied, cleaned: false) }
         return .askModel(timeout: remaining, tidied: tidied)
     }
 
