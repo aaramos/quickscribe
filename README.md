@@ -19,9 +19,11 @@ route can point at your own OpenAI-compatible service instead (see below).
 1. Open `QuickScribe.dmg` and drag the app to Applications.
 2. Open it from Applications. macOS will block it the first time, because this free,
    open-source app isn't signed with a paid Apple Developer ID: macOS can't check who made
-   it, so it asks you. System Settings offers **Open Anyway** next to the message about
-   QuickScribe; if you don't see it where you are, search "Open Anyway" in System
-   Settings. This is a one-time step.
+   it, so it asks you. Try opening it once more first: **Open Anyway** only appears in
+   System Settings after a launch attempt has actually been blocked, and it doesn't stay
+   on screen for long. So go to System Settings right after a blocked attempt and click
+   Open Anyway where it appears next to the message about QuickScribe; if you don't see
+   it where you are, search "Open Anyway" in System Settings. This is a one-time step.
 3. Grant Microphone and Accessibility when asked, then quit and reopen the app.
 4. Look for the icon in the menu bar. There's no window.
 
@@ -37,11 +39,14 @@ To build the installer yourself, run `app/make_installer.sh`.
 
 ## Updating
 
-The menu bar icon tells you when a newer version is out, and the menu links to the
-release page. The app never downloads or installs anything itself: you drag the new
-disk image to Applications when you choose. After an update macOS may ask for
-Microphone and Accessibility again; switch them back on if the hotkeys go quiet. Your
-settings and edited prompts survive the update.
+The app checks GitHub at launch and once a day. When a newer version is out you get one
+short notice on screen, and the menu grows an "Update available: version X" item that
+opens that release's page; the menu bar icon itself does not change. The notice never
+interrupts a dictation: if you are recording, it waits for a quiet moment. The app never
+downloads or installs anything itself: you drag the new disk image to Applications when
+you choose. After an update macOS may ask for Microphone and Accessibility again; switch
+them back on if the hotkeys go quiet, and if a switch already looks on, turn it off and
+on again. Your settings and edited prompts survive the update.
 
 ## Your own service (optional)
 
@@ -55,9 +60,10 @@ If the address is not on this Mac or your local network, your words and your key
 to it, and they are only encrypted if the address uses https; plain http to a remote
 address is refused. A non-local address also shows a warning on screen.
 
-What always leaves the Mac, even with no address set: one plain HTTPS question a day to
-GitHub's release API ("is there a newer version?"), carrying nothing but the app name
-and version. No words, no audio, no identifiers.
+What always leaves the Mac, even with no address set: a plain HTTPS question to GitHub's
+release API ("is there a newer version?") at launch and once a day, carrying nothing but
+the app name and version. No words, no audio. Like any web request, it lets GitHub see
+your network address.
 
 Don't run it alongside the original QuickScribe. Both use the same hotkey, so this one
 refuses to record and says why.
