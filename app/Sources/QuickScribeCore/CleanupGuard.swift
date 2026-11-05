@@ -122,7 +122,7 @@ public enum CleanupGuard {
             + #"|[0-9]+(?:[.,][0-9]+)*)"#,
         options: [.caseInsensitive])
 
-    /// A marker pressed right against a number, on either side of it.
+    /// A marker pressed right after a number, starting at the number's tail.
     private static let afterMarker = try! NSRegularExpression(
         pattern: #"^\s*[.,;:]?\s*([ap])([.\s]*)m\b\s*([a-z]*)"#, options: [.caseInsensitive])
 

@@ -127,9 +127,9 @@ public struct EndpointSettings: Equatable, Sendable {
 
     public var hostName: String { apiBase?.host ?? "" }
 
-    /// Loopback, `.local`, and private LAN ranges count as local.
-    /// True for loopback and private network numbers, and only for them. Host
-    /// names are never local: "127.evil.com" points wherever its owner says,
+    /// True for loopback, link-local, the private LAN ranges, `localhost`, and
+    /// any `.local` name, and only for those. A name of any other shape is
+    /// never local by number: "127.evil.com" points wherever its owner says,
     /// so a name that merely begins with a private number gets no free pass.
     public static func isLocal(host: String) -> Bool {
         let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))   // URL.host wraps IPv6 in brackets

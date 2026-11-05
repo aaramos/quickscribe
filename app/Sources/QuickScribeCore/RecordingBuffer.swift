@@ -62,15 +62,6 @@ public final class RecordingBuffer: @unchecked Sendable {
         queue.sync { (Self.wavData(samples), didOverflow) }
     }
 
-    /// Drops the audio and rejects anything still in flight. Called on
-    /// finish, cancel and every failure path; after it, no bytes come back.
-    public func clear() {
-        queue.sync {
-            self.samples.removeAll()
-            self.didOverflow = false
-        }
-    }
-
     /// Clears and stops accepting appends: a recording that is gone must not
     /// grow again from buffers that were already in flight.
     public func discard() {

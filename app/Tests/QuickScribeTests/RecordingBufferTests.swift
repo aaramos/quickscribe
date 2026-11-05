@@ -90,16 +90,6 @@ final class RecordingBufferTests: XCTestCase {
         XCTAssertEqual(data.count, 44 + 2 * 1_600, "exactly the limited clip, no silent extra words")
     }
 
-    func testClearFreesTheAudio() {
-        let rec = RecordingBuffer()
-        rec.append(buffer([0.1, 0.2, 0.3]))
-        _ = rec.wav()
-        rec.clear()
-        let (data, overflowed) = rec.wav()
-        XCTAssertEqual(data.count, 44, "cleared: no bytes left")
-        XCTAssertFalse(overflowed)
-    }
-
     func testDiscardIgnoresInFlightAppends() {
         let rec = RecordingBuffer()
         rec.append(buffer([Float](repeating: 0.1, count: 100)))
