@@ -29,8 +29,8 @@ final class EndpointSettingsStoreTests: XCTestCase {
 
     func testRoundTripOfAddressModelsAndChoices() throws {
         let store = EndpointSettingsStore(defaults: defaults, secrets: MemorySecrets.Store())
-        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "whisper-large",
-                                 cleanupModel: "qwen-tidy",
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "transcribe-1",
+                                 cleanupModel: "tidy-1",
                                  useCustomSpeech: true, useCustomCleanup: false)
         s.language = EndpointSettings.deviceLanguage   // follows the Mac, never stored
         store.save(s)

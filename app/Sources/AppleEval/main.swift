@@ -2,14 +2,15 @@ import AVFoundation
 import Foundation
 import QuickScribeCore
 
-// Compares Apple's speech and cleanup with today's QuickScribe on the same
-// scripted dictations. Usage:
+// Runs the same scripted dictations through the app's own cleanup code:
+// Apple's on-device model, or, for the service_* variants, a real
+// OpenAI-compatible server named entirely by the environment:
+//   QSE_BASE=<url> QSE_MODEL=<name> and QSE_KEY=<key> or QSE_KEYFILE=<json>
+// Usage:
 //   apple-eval speech <corpus.json> <audio-dir>               -> JSON lines
 //   apple-eval clean <corpus.json> <variant>                  -> JSON lines
 //       variants: rules | polish | concise | active_voice | rewrite
 //       ... or service_polish and friends, which run the person's service
-//       (address QSE_BASE, model QSE_MODEL, key QSE_KEY or key file
-//       QSE_KEYFILE, defaulting to the local server and its settings file)
 //   apple-eval limits
 //   apple-eval live <file.wav> ...
 
@@ -78,12 +79,11 @@ func guardMode(_ variant: String) -> String {
 
 func serviceCleaner() -> any Cleaning {
     let env = ProcessInfo.processInfo.environment
-    let address = env["QSE_BASE"] ?? "http://127.0.0.1:1234/v1"
+    let address = env["QSE_BASE"] ?? ""       // no default: the person's server, named here
     let model = env["QSE_MODEL"] ?? ""
     var key = env["QSE_KEY"]
-    if key == nil {
-        let path = (env["QSE_KEYFILE"] ?? "~/.omlx/settings.json")
-            .replacingOccurrences(of: "~", with: NSHomeDirectory())
+    if key == nil, let keyPath = env["QSE_KEYFILE"], !keyPath.isEmpty {
+        let path = (keyPath as NSString).expandingTildeInPath
         if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let auth = json["auth"] as? [String: Any] {
