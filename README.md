@@ -31,6 +31,18 @@ To build the installer yourself, run `app/make_installer.sh`.
 - Hold **⌃⌘⇧** to Rewrite one dictation.
 - Edit each mode's instructions in **Settings…**, and try them on sample text there.
 
+## Your own service (optional)
+
+By default everything runs on Apple's on-device models and no words leave the Mac.
+Settings can point speech, cleanup, or both at any OpenAI-compatible address you run
+(`/v1`). Set the address, add an API key if your service needs one (kept in the Keychain),
+pick the Speech and Cleanup models by name, and press Test Connection to check the four
+things it needs to work. With no address set, Apple's models are used.
+
+If the address is not on this Mac or your local network, your words and your key travel
+to it, and they are only encrypted if the address uses https; plain http to a remote
+address is refused. A non-local address also shows a warning on screen.
+
 Don't run it alongside the original QuickScribe. Both use the same hotkey, so this one
 refuses to record and says why.
 
@@ -53,8 +65,10 @@ refuses to record and says why.
    fails the check, the tidied text is inserted and the overlay says so.
 
 If nothing that accepts text has focus, the cleaned-up text goes on the clipboard instead
-and the overlay says so. Dictated text never leaves the Mac, never goes in the logs, and isn't saved: there is no
-history. Edited prompts are saved in `~/Library/Application Support/QuickScribe/prompts.json`.
+and the overlay says so. With Apple's models (the default) dictated text never leaves the
+Mac, never goes in the logs, and isn't saved: there is no history. If you set a custom
+service in Settings, only the routes you switched to Custom go to that address. Edited
+prompts are saved in `~/Library/Application Support/QuickScribe/prompts.json`.
 
 ## Build and test
 
