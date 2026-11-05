@@ -30,6 +30,7 @@ public enum CleanupGuard {
 
     public static func accepts(output: String, input: String, mode: String) -> Bool {
         guard digitsComeFromInput(output: output, input: input) else { return false }
+        guard !inventsCurrency(output: output, input: input) else { return false }
         // A question that came back as a statement has been answered.
         if input.contains("?"), !output.contains("?") { return false }
         guard let limits = limits(mode) else { return true }
@@ -59,6 +60,24 @@ public enum CleanupGuard {
 
     private static func isNotNumber(_ word: String) -> Bool {
         units[word] == nil && scales[word] == nil && !word.allSatisfy(\.isNumber)
+    }
+
+    private static let currencySymbols = CharacterSet(charactersIn: "$€£¥₹")
+    private static let currencyWords: Set<String> = [
+        "dollar", "dollars", "euro", "euros", "cent", "cents", "penny", "pennies",
+        "pound", "pounds", "yen", "yuan", "rupee", "rupees", "franc", "francs",
+        "peso", "pesos", "krona", "kronor", "krone", "kroner", "bucks", "usd", "eur",
+        "gbp", "cad", "aud", "jpy", "inr", "chf", "rmb", "bitcoin", "bitcoins",
+    ]
+
+    /// A dollar sign on a number the speaker never gave a currency to is a
+    /// wrong number wearing a right one: "4.2 million" must not come back as
+    /// "$4.2 million". With a currency word or symbol in the dictation, the
+    /// symbol is just formatting ("4.2 million dollars" to "$4.2 million").
+    static func inventsCurrency(output: String, input: String) -> Bool {
+        guard output.rangeOfCharacter(from: currencySymbols) != nil else { return false }
+        if input.rangeOfCharacter(from: currencySymbols) != nil { return false }
+        return !words(input).contains { currencyWords.contains($0) }
     }
 
     private static func words(_ text: String) -> [String] {

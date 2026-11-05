@@ -123,6 +123,21 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertTrue(ok("Some words were spoken aloud today.", "Some words were said.", "rewrite"))
         XCTAssertFalse(ok("It rose 40 percent.", "It rose a lot.", "rewrite"))
     }
+    func testGuardRefusesACurrencyTheSpeakerNeverNamed() {
+        XCTAssertFalse(CleanupGuard.accepts(output: "Revenue was $4.2 million last quarter.",
+                                            input: "revenue was 4.2 million last quarter", mode: "polish"),
+                       "a dollar sign from nowhere turns a number into a confident wrong one")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Revenue was $4.2 million.",
+                                           input: "revenue was 4.2 million dollars", mode: "polish"),
+                      "the word dollars may become the sign")
+        XCTAssertTrue(CleanupGuard.accepts(output: "It is $1400.", input: "it is $1400", mode: "polish"))
+        XCTAssertFalse(CleanupGuard.accepts(output: "It costs €5.", input: "it costs 5", mode: "polish"))
+        XCTAssertTrue(CleanupGuard.accepts(output: "It costs 5 euros.", input: "it costs 5 euros", mode: "polish"))
+        // Rewrite's looser limits still never allow invented currency.
+        XCTAssertFalse(CleanupGuard.accepts(output: "The rent is $950 a month.",
+                                            input: "the rent is 950 a month", mode: "rewrite"))
+    }
+
 }
 
 final class CleanupGuardAddedSentenceTests: XCTestCase {
