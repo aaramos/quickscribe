@@ -43,12 +43,12 @@ final class SessionController {
         overlay.onEscape = { [weak self] in
             Task { @MainActor in self?.cancel() }
         }
-        // LEVEL TAP → WF1 ticker (t_3db202e7). Read-only; chunk pipeline
+        // LEVEL TAP → WF1 ticker. Read-only; chunk pipeline
         // untouched.
         capture.onLevel = { [weak self] lvl in
             self?.overlay.pushLevel(lvl)
         }
-        // Device hot-plug / default-change (t_eec52a7e): re-resolve AND drop
+        // Device hot-plug / default-change: re-resolve AND drop
         // the engine instance the OS pinned to the old device — re-resolving
         // alone is pointless while a stale engine survives (that was the
         // "new mic ignored until relaunch" defect). Idle-only: mid-capture
@@ -320,7 +320,7 @@ final class SessionController {
 
     // Expose overlay + hotkey start to the app delegate.
     /// Returns true only if the event tap is live — the delegate must NOT
-    /// pretend hotkeys work otherwise (dead-listener defect, t_49e2302f).
+    /// pretend hotkeys work otherwise.
     @discardableResult
     func activate() -> Bool { hotkeys.start() }
     func showOverlay(_ s: OverlayController.State, autoHide: TimeInterval? = nil) { overlay.show(s, autoHideAfter: autoHide) }

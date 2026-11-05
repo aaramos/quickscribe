@@ -15,7 +15,7 @@ final class OverlayShotsTests: XCTestCase {
             ("long", .recording(mode: "Polish", words: "Revenue was 4.2 million last quarter, up 17 percent, and we are hiring 12 more engineers by December 15th, so let's meet on Friday")),
             ("processing", .processing), ("inserted", .inserted),
             ("degraded", .degraded), ("cancelled", .cancelled), ("copied", .copied), ("mode", .modeChanged("Concise")),
-            ("error", .error("Couldn't hear you. Check your mic (device: Logitech C920).")),
+            ("error", .error("Couldn't hear you. Check your mic (device: USB Mic).")),
         ]
         for (name, state) in states {
             overlay.show(state)

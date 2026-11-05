@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var session = SessionController(prompts: prompts)
     private lazy var settingsWindow = SettingsWindow(library: prompts)
 
-    /// Icon A equalizer animation — runs ONLY while recording (t_3db202e7).
+    /// Icon A equalizer animation — runs ONLY while recording.
     /// Static template glyph at rest so idle CPU is zero.
     private var iconTimer: Timer?
     private var iconPhase: Double = 0
@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// True only when the global event tap is live (hotkeys actually work).
     private var hotkeysLive: Bool { session.hotkeys.tapLive }
 
-    // MARK: - Menu-bar icon states (Icon A, t_3db202e7)
+    // MARK: - Menu-bar icon states
 
     private func applyIcon(animated: Bool, dimmed: Bool = false) {
         guard let button = statusItem.button else { return }
@@ -200,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         how.isEnabled = false
         menu.addItem(how)
 
-        // Hold-only keyboard gesture → hands-free toggle lives here (owner UX change 2026-09-18).
+        // Hold-only keyboard gesture → hands-free toggle lives here.
         let toggle = NSMenuItem(title: session.isRecording ? "Stop Recording (hands-free)" : "Start Recording (hands-free)",
                                 action: #selector(toggleHandsFree), keyEquivalent: "")
         toggle.target = self

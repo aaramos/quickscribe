@@ -72,7 +72,7 @@ enum AudioPreflight {
 final class AudioCapture {
     /// NOT a `let`: AVAudioEngine binds its input device the first time the
     /// node graph is touched and never re-reads the system default (proven
-    /// on macOS 27, t_eec52a7e: an engine first touched while default=A keeps
+    /// on macOS 27: an engine first touched while default=A keeps
     /// reporting A's format after the default switches to B; only a FRESH
     /// engine reports B). A long-lived engine is therefore exactly the
     /// "new mic ignored until app restart" defect — `invalidateEngine()`
@@ -86,11 +86,11 @@ final class AudioCapture {
 
     /// Active capture device (resolved at start, shown in the overlay pill).
     private(set) var activeDevice: InputDeviceResolver.Device?
-    /// LIVE tap format from the engine that actually captured (t_eec52a7e
-    /// proof hook): shows the device the ENGINE bound, not what the resolver
+    /// LIVE tap format from the engine that actually captured, for proof
+    /// checks: shows the device the ENGINE bound, not what the resolver
     /// asked for. nil when no capture has run since the last invalidate.
     private(set) var liveTapFormat: AVAudioFormat?
-    /// Scoped default-input switch owned by the capture window (t_b3e7802c).
+    /// Scoped default-input switch owned by the capture window.
     private var bind: InputDeviceResolver.Bind?
     /// Window accounting for the honest "Couldn't hear you" path.
     private(set) var voicedWindows = 0
@@ -100,7 +100,7 @@ final class AudioCapture {
     /// valid during the call.
     var onBuffer: ((AVAudioPCMBuffer) -> Void)?
 
-    /// LEVEL TAP (t_3db202e7): invoked on a background queue with the live
+    /// LEVEL TAP: invoked on a background queue with the live
     /// input level 0...1 for every capture buffer, ~1 frame per 16 ms so a
     /// 60 fps waveform has real data behind it. Pure read-only tap — it
     /// does not touch the chunk pipeline. UI-only consumer (WF1 overlay).
@@ -137,7 +137,7 @@ final class AudioCapture {
             do { inputFormat = try startEngine() } catch { throw CaptureError(why: "mic unavailable: \(error.localizedDescription)") }
         }
         // installTap throws NSException on format mismatch — must be inside
-        // the exception bridge (t_50da3b54) or AppKit swallows it as a
+        // the exception bridge or AppKit swallows it as a
         // silent no-op.
         if let exc = ExceptionGuard.run({ [engine, inputFormat] in
             engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buf, _ in
@@ -154,14 +154,14 @@ final class AudioCapture {
 
     private func startEngine() throws -> AVAudioFormat {
         // macOS 27 regression: prepare() with an untouched inputNode throws an
-        // ObjC exception (inputNode != nullptr) on this host — every device,
-        // every process (t_220b8507 run 28). Querying the input format first
+        // ObjC exception (inputNode != nullptr) on every device,
+        // every process. Querying the input format first
         // makes the graph initialize. Do NOT reorder these lines.
         if case .failure(let pf) = AudioPreflight.check() {
             throw CaptureError(why: pf.why)
         }
-        // Device bind (t_b3e7802c): never trust the OS default — on this
-        // host it is BlackHole 2ch (silent virtual loopback, proven RCA).
+        // Device bind: never trust the OS default, which can be a
+        // silent virtual loopback such as BlackHole.
         // Engine-level device APIs are absent from this OS's AVFAudio
         // runtime; the proven mechanism is a scoped default-input switch
         // across the capture window, restored on stop.
@@ -190,9 +190,9 @@ final class AudioCapture {
                 throw CaptureError(why: "engine init: \(exc)")
             }
             engineStarted = true
-            // macOS 27 trap (t_50da3b54): the pre-start inputNode.outputFormat
+            // macOS 27 trap: the pre-start inputNode.outputFormat
             // can report a nominal rate (16k) that the hardware does NOT come up
-            // at (C920 starts at 48k/2ch). Installing the tap with the stale
+            // at (a USB webcam can start at 48k/2ch). Installing the tap with the stale
             // pre-start format throws com.apple.coreaudio.avfaudio from
             // InstallTapOnNode — inside start(), OUTSIDE the ExceptionGuard —
             // which AppKit swallows: menu click and hotkey both become silent
@@ -205,7 +205,7 @@ final class AudioCapture {
             liveTapFormat = liveFmt
             return liveFmt
         } catch {
-            // Unwind in reverse order of acquisition (t_a0fb24bb): a started
+            // Unwind in reverse order of acquisition: a started
             // engine must be stopped BEFORE the default-input bind is restored
             // — stopping afterward races the bind flip — and an engine left
             // running with isCapturing == false holds the device. stop() can
@@ -217,7 +217,7 @@ final class AudioCapture {
             activeDevice = nil
             liveTapFormat = nil
             // Failed engine instance has already pinned the device it tried
-            // (t_eec52a7e lesson: engines pin at first touch for their LIFETIME)
+            // engines pin at first touch for their LIFETIME
             // — swap in a fresh one so the next start() re-pins the CURRENT
             // resolver choice. We are idle by construction here, the same
             // precondition invalidateEngine asserts.
@@ -227,7 +227,7 @@ final class AudioCapture {
     }
 
     /// Drop the pinned engine so the NEXT start() binds the current default
-    /// input (t_eec52a7e). Only valid while idle — mid-capture the engine is
+    /// input. Only valid while idle — mid-capture the engine is
     /// deliberately left alone (a mid-session hot-swap of OUTPUTS must not
     /// disturb recording; the bind/restore pair keeps the input stable for
     /// the whole capture window).

@@ -2,14 +2,14 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-/// Input-device resolution (t_b3e7802c): the OS default input on this host
-/// is BlackHole 2ch — a virtual loopback that carries NO live signal, which
-/// once fed the recognizer silence and produced invented text. The app must therefore NEVER trust the OS default
+/// Input-device resolution: a Mac's default input can be a virtual loopback
+/// such as BlackHole, which carries NO live signal and once fed the recognizer
+/// silence and produced invented text. The app must therefore NEVER trust the OS default
 /// blindly.
 ///
 /// Resolution order:
 ///   1. QUICKSCRIBE_INPUT_PIN env — substring match against device names
-///      (harness/owner override, e.g. "C920").
+///      (test override, e.g. "USB Mic").
 ///   2. The OS default input — but ONLY if it is real (input channels > 0
 ///      and not a known virtual/loopback device by name).
 ///   3. The first real input device (enumeration order = user preference
@@ -110,7 +110,7 @@ enum InputDeviceResolver {
                 pin: ProcessInfo.processInfo.environment["QUICKSCRIBE_INPUT_PIN"])
     }
 
-    /// Pure selection core (t_eec52a7e unit proof): no CoreAudio calls, so
+    /// Pure selection core: no CoreAudio calls, so
     /// a fake device list can drive the phantom-gate / fallback rules.
     /// `resolve()` above is a thin wrapper over this — keep them in sync by
     /// keeping ALL logic here.
@@ -145,8 +145,8 @@ enum InputDeviceResolver {
     // newer typed device API does not exist in this framework build). The
     // engine therefore binds the SYSTEM default input at start(). Binding a
     // resolved real mic = switch the default for the capture window, restore
-    // on stop. Proven mechanism on this host (t_955de3e6 e2e harness uses the
-    // identical CoreAudio property switch).
+    // on stop. The end-to-end test harness uses the identical CoreAudio
+    // property switch.
 
     struct Bind {
         let switched: Bool

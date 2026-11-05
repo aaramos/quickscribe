@@ -6,7 +6,7 @@ import QuickScribeCore
 ///
 /// There is one attempt, not a retry: cleanup output is deterministic, so a refusal
 /// would simply repeat. A failure always falls back to the rule-tidied text, because
-/// the person's words must never be lost. (Owner decision 2026-11-01: filler-only
+/// the person's words must never be lost. (Filler-only
 /// speech is kept too, so a tidied result that comes out empty falls back to raw.)
 enum PolishPlanner {
     enum Step: Equatable {

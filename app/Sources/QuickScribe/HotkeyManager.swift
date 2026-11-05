@@ -5,7 +5,7 @@ import Foundation
 /// Global hotkey listener (CGEvent tap — works while other apps are focused;
 /// requires Accessibility permission).
 ///
-/// Owner UX change 2026-09-18: modifier-only chord, replacing ⌘⌥Space
+/// A modifier-only chord, replacing ⌘⌥Space
 /// (which collided with other apps). Pure listen-only tap — QuickScribe
 /// never cancels or modifies an event; every key keeps reaching the system
 /// untouched.

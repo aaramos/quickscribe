@@ -1,7 +1,6 @@
 import AppKit
 
-/// Icon A (waveform-pulse) from the owner-picked concept board
-/// (docs/concepts/icons-waveform.html, t_bdf8672e → t_3db202e7).
+/// Icon A (waveform-pulse).
 /// Exact vectors: viewBox 0 0 22 22, stroke 1.7, round caps, fill none:
 ///   M 7 6.5 V 15.5   M 11 4 V 18   M 15 7.5 V 14.5
 /// Monochrome template image → the system tints it for light/dark menu bars.
