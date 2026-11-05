@@ -270,6 +270,11 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertTrue(CleanupGuard.accepts(output: "The 3 p.m. call and the p.m. news.",
                                            input: "the 3 p.m. call and the p.m. news", mode: "polish"),
                       "tied stays tied, free stands on its own speaker-written twin")
+        XCTAssertFalse(CleanupGuard.inventsTimeOfDay(output: "Babe, I am grabbing dinner.",
+                                                     input: "babe grab dinner on your way home"),
+                       "the verb am, pronoun beside it, claims no time on the written side either")
+        XCTAssertTrue(CleanupGuard.inventsTimeOfDay(output: "Watch the a.m. news.", input: "watch the news"),
+                      "a dotted a.m. is never a verb and still claims a time")
         // Word boundaries: "often" holds no ten, "someone" no one, so an
         // answer left untouched is never stamped for a verb's am.
         XCTAssertTrue(CleanupGuard.accepts(output: "It costs often. Am I right?",

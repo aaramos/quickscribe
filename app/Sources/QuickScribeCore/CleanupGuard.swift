@@ -200,6 +200,31 @@ public enum CleanupGuard {
         return (kind, tail.distance(from: tail.startIndex, to: kindR.lowerBound))
     }
 
+    private static func verbNeighbor(leftOf idx: String.Index, in lower: String) -> Bool {
+        var i = idx
+        while i > lower.startIndex, lower[lower.index(before: i)].isWhitespace {
+            i = lower.index(before: i)
+        }
+        let wordEnd = i
+        while i > lower.startIndex {
+            let before = lower[lower.index(before: i)]
+            if before == "'" { i = lower.index(before: i); continue }        // "I'm"-style apostrophes
+            if !before.isLetter { break }
+            i = lower.index(before: i)
+        }
+        return lower[i..<wordEnd] == "i"
+    }
+
+    private static func verbNeighbor(rightOf idx: String.Index, in lower: String) -> Bool {
+        var i = idx
+        while i < lower.endIndex, lower[i].isWhitespace || lower[i] == "," || lower[i] == "?" {
+            i = lower.index(after: i)
+        }
+        var end = i
+        while end < lower.endIndex, lower[end].isLetter { end = lower.index(after: end) }
+        return end > i && lower[i..<end] == "i"
+    }
+
     /// A text's markers in two sorts: tied to a number, with that number's
     /// digits, and free-standing words. An answer may tie a marker only
     /// where its own number earned it, and may write a free marker only
@@ -217,9 +242,18 @@ public enum CleanupGuard {
         }
         var free: [Character] = []
         for m in markerWord.matches(in: lower, range: NSRange(lower.startIndex..., in: lower)) {
-            guard let kindR = Range(m.range(at: 1), in: lower),
+            guard let whole = Range(m.range, in: lower),
+                  let kindR = Range(m.range(at: 1), in: lower),
+                  let middleR = Range(m.range(at: 2), in: lower),
                   !attachedAt.contains(kindR.lowerBound)
             else { continue }
+            // A bare "am" leaning on the pronoun I is the verb wherever it
+            // stands: "I am grabbing dinner" and "am I right" claim no time.
+            // Dots ("a.m.") and p are always the time shape.
+            if lower[whole] == "am", !lower[middleR].contains(".") {
+                if verbNeighbor(leftOf: whole.lowerBound, in: lower)
+                    || verbNeighbor(rightOf: whole.upperBound, in: lower) { continue }
+            }
             free.append(lower[kindR].first!)
         }
         return (tied, free)
