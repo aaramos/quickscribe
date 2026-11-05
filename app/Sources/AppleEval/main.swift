@@ -6,6 +6,10 @@ import QuickScribeCore
 // scripted dictations. Usage:
 //   apple-eval speech <corpus.json> <audio-dir>               -> JSON lines
 //   apple-eval clean <corpus.json> <variant>                  -> JSON lines
+//       variants: rules | polish | concise | active_voice | rewrite
+//       ... or service_polish and friends, which run the person's service
+//       (address QSE_BASE, model QSE_MODEL, key QSE_KEY or key file
+//       QSE_KEYFILE, defaulting to the local server and its settings file)
 //   apple-eval limits
 //   apple-eval live <file.wav> ...
 
@@ -59,13 +63,42 @@ func instructions(_ variant: String) -> (String?, AppleCleaner.Filter) {
     case "concise": return (FactoryPrompts.concise, .permissive)
     case "active_voice": return (FactoryPrompts.activeVoice, .permissive)
     case "rewrite": return (FactoryPrompts.rewrite, .permissive)
+    case "service_polish": return (ServicePrompts.polish, .permissive)
+    case "service_concise": return (ServicePrompts.concise, .permissive)
+    case "service_active_voice": return (ServicePrompts.activeVoice, .permissive)
+    case "service_rewrite": return (ServicePrompts.rewrite, .permissive)
     default: fatalError("unknown variant \(variant)")
     }
 }
 
+/// "service_polish" checks the same guard as "polish".
+func guardMode(_ variant: String) -> String {
+    variant.hasPrefix("service_") ? String(variant.dropFirst("service_".count)) : variant
+}
+
+func serviceCleaner() -> any Cleaning {
+    let env = ProcessInfo.processInfo.environment
+    let address = env["QSE_BASE"] ?? "http://127.0.0.1:1234/v1"
+    let model = env["QSE_MODEL"] ?? ""
+    var key = env["QSE_KEY"]
+    if key == nil {
+        let path = (env["QSE_KEYFILE"] ?? "~/.omlx/settings.json")
+            .replacingOccurrences(of: "~", with: NSHomeDirectory())
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let auth = json["auth"] as? [String: Any] {
+            key = auth["api_key"] as? String
+        }
+    }
+    let settings = EndpointSettings(address: address, cleanupModel: model, useCustomCleanup: true)
+    return EndpointCleaner(client: OpenAICompatClient(settings: settings, apiKey: key, timeout: 120),
+                           model: model)
+}
+
 func runClean(_ args: [String]) async throws {
-    let (prompt, filter) = instructions(args[1])
-    let cleaner = AppleCleaner(filter: filter)
+    let variant = args[1]
+    let (prompt, filter) = instructions(variant)
+    let cleaner: any Cleaning = variant.hasPrefix("service_") ? serviceCleaner() : AppleCleaner(filter: filter)
     for item in try corpus(args[0]) {
         let tidied = TextCleanup.tidy(item.raw)
         guard let prompt else {
@@ -76,7 +109,7 @@ func runClean(_ args: [String]) async throws {
         do {
             let text = try await cleaner.clean(tidied, instructions: prompt)
             let seconds = Date().timeIntervalSince(start)
-            if CleanupGuard.accepts(output: text, input: tidied, mode: args[1]) {
+            if CleanupGuard.accepts(output: text, input: tidied, mode: guardMode(variant)) {
                 emit(["id": item.id, "text": text, "seconds": seconds])
             } else {
                 emit(["id": item.id, "text": tidied, "seconds": seconds, "guarded": text])

@@ -215,4 +215,33 @@ final class SettingsConnectionTests: XCTestCase {
         popups[0].selectItem(at: 1)
         commit(popups[0])
     }
+    /// The prompt test runs the selected route for real: with Cleanup set to
+    /// Custom the request goes to the service with the service's own factory
+    /// text, and a wrong key answers with its plain sentence on screen.
+    func testPromptTestSendsToTheSelectedServiceRoute() async throws {
+        try secrets.setSecret("k")
+        addressField.stringValue = service.baseURL
+        commit(addressField)
+        popups[1].selectItem(at: 1)              // Cleanup: Custom service
+        commit(popups[1])
+        combos[1].stringValue = "tidy-y"
+        commit(combos[1])
+        service.queue(FakeService.Rule(status: 401, body: Data("{}".utf8)), forPath: "/v1/chat/completions")
+
+        let root = try XCTUnwrap(settings.window?.contentView)
+        let button = try XCTUnwrap(all(NSButton.self, in: root).first { $0.title == "Test Prompt" })
+        button.performClick(nil)
+        for _ in 0..<200 where !button.isEnabled { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(button.isEnabled, "Test Prompt never finished")
+        let output = try XCTUnwrap(all(NSTextView.self, in: root).first { !$0.isEditable })
+        XCTAssertTrue(output.string.contains("refused the key"), output.string)
+
+        let chat = try XCTUnwrap(service.received.first { $0.path == "/v1/chat/completions" })
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: chat.body) as? [String: Any])
+        XCTAssertEqual(json["model"] as? String, "tidy-y")
+        let messages = try XCTUnwrap(json["messages"] as? [[String: String]])
+        XCTAssertTrue(messages[0]["content"]!.contains("publication-ready"),
+                      "the service route tested its own longer factory set")
+    }
+
 }
