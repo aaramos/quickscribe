@@ -26,8 +26,8 @@ final class SessionController {
 
     private let prompts: PromptLibrary
     private let endpointStore: EndpointSettingsStore
-    private let cleaner = AppleCleaner()
-    private var transcription: LiveTranscription?
+    private let appleCleaner = AppleCleaner()
+    private var transcription: (any SpeechAccepting)?
     /// The whole recording for a custom speech service. Rebuilt every session
     /// so buffers from a discarded one can never leak into the next.
     private var recording = RecordingBuffer()
@@ -36,6 +36,22 @@ final class SessionController {
     private var releaseAt: Date?           // hotkey-release: TTI starts here (brief §Speed)
     private var insertOnce = false              // guarantees insert happens exactly once
     private var generation = 0                  // invalidates in-flight work after cancel
+
+    // MARK: - Test seams
+    // The paths below reach the keyboard, the clipboard, Apple's model and
+    // the clock, so every one of those sits behind a replaceable seam. The
+    // defaults are exactly the production behavior.
+    var clock: () -> Date = { Date() }
+    private(set) var pillLog: [OverlayController.State] = []
+    var targetReader: () -> InsertionTarget = { InsertionTarget.current() }
+    var textInserter: (String, @escaping (Bool, Bool) -> Void) -> Void = { Insertion.insert($0, completion: $1) }
+    var copyWriter: (String) -> Bool = { Insertion.copy($0) }
+    var pasteKept: (String) -> Bool = { Insertion.pasteAndKeep($0) }
+    var cleaner: any Cleaning = AppleCleaner()
+    var appleModelReadyOverride: Bool?
+    /// Overrides the "the mic heard nothing all session" reading, which is
+    /// always true while no real capture ever ran (tests drive releases).
+    var silentSessionOverride: Bool?
 
     /// Menu bar needs to know when sessions start/end (icon state, menu disable).
     var onPhaseChange: ((Bool) -> Void)?
@@ -77,7 +93,7 @@ final class SessionController {
     /// Gets both Apple models ready so the first dictation isn't the slow one. A
     /// missing speech model downloads through the OS here.
     func prepare() {
-        cleaner.prewarm()
+        appleCleaner.prewarm()
         Task.detached {
             do {
                 try await AppleSpeechSession.ensureInstalled()
@@ -125,7 +141,7 @@ final class SessionController {
     }
 
     private func announceProfile() {
-        overlay.show(.modeChanged(RefineMode.title(forProfile: defaultProfile)), autoHideAfter: 1.5)
+        pill(.modeChanged(RefineMode.title(forProfile: defaultProfile)), autoHideAfter: 1.5)
     }
 
     /// Menu-bar hands-free toggle: "Start/Stop Recording (hands-free)".
@@ -144,7 +160,7 @@ final class SessionController {
 
     private func start(rewrite: Bool) {
         guard NSRunningApplication.runningApplications(withBundleIdentifier: AppInfo.originalBundleID).isEmpty else {
-            overlay.show(.error("Quit the original QuickScribe first, or both would paste."), autoHideAfter: 3.0)
+            pill(.error("Quit the original QuickScribe first, or both would paste."), autoHideAfter: 3.0)
             return
         }
         // Fresh generation invalidates any stragglers from a prior session.
@@ -175,18 +191,18 @@ final class SessionController {
             let msg = e.why.contains("no microphone")
                 ? "No microphone detected"
                 : "Mic unavailable. Check Microphone permission."
-            overlay.show(.error(msg), autoHideAfter: 2.5)
+            pill(.error(msg), autoHideAfter: 2.5)
             NSLog("QuickScribe: capture start failed: \(e.why)")
             abandonTranscription()
             return
         } catch {
-            overlay.show(.error("Mic unavailable. Check Microphone permission."), autoHideAfter: 2.5)
+            pill(.error("Mic unavailable. Check Microphone permission."), autoHideAfter: 2.5)
             abandonTranscription()
             return
         }
         mode = .pushToTalk
         overlay.resetLevels()
-        overlay.show(.recording(mode: RefineMode.title(forProfile: profile)))   // same tick as the hotkey, so it feels instant
+        pill(.recording(mode: RefineMode.title(forProfile: profile)))   // same tick as the hotkey, so it feels instant
         onPhaseChange?(true)
     }
 
@@ -209,10 +225,10 @@ final class SessionController {
     private func finish() {
         guard mode != .idle else { return }
         mode = .idle
-        releaseAt = Date()
+        releaseAt = clock()
         captureSeconds = capture.stop()
         capture.onBuffer = nil
-        overlay.show(.processing)
+        pill(.processing)
         onPhaseChange?(false)
         let gen = generation
         guard let live = transcription else { return }
@@ -250,10 +266,10 @@ final class SessionController {
                     let fallback = await appleWords()
                     guard generation == gen else { return }
                     if let fallback, !fallback.isEmpty {
-                        overlay.show(.error("Your speech service failed. Used Apple's words."), autoHideAfter: 3.0)
+                        pill(.error("Your speech service failed. Used Apple's words."), autoHideAfter: 3.0)
                         resolveFinalText(fallback, generation: gen)
                     } else {
-                        overlay.show(.error("Your speech service failed, and Apple speech gave no words either."),
+                        pill(.error("Your speech service failed, and Apple speech gave no words either."),
                                      autoHideAfter: 3.5)
                     }
                 }
@@ -264,7 +280,7 @@ final class SessionController {
                 let raw = try await live.finish()
                 guard generation == gen else { return }
                 if case .appleOnly(let why) = route, !why.isEmpty {
-                    overlay.show(.error(why), autoHideAfter: 3.5)
+                    pill(.error(why), autoHideAfter: 3.5)
                 }
                 resolveFinalText(raw, generation: gen)
             } catch {
@@ -285,7 +301,7 @@ final class SessionController {
         speechTask = nil
         recording.discard()           // and free the audio
         insertOnce = true             // a late finish must not insert anymore
-        overlay.show(.cancelled, autoHideAfter: 1.2)
+        pill(.cancelled, autoHideAfter: 1.2)
         onPhaseChange?(false)
     }
 
@@ -296,15 +312,22 @@ final class SessionController {
 
     // MARK: - Transcript
 
+    /// Every pill state goes through here: it shows and remembers, so tests
+    /// can check the ORDER states appeared in, not just the last one.
+    private func pill(_ state: OverlayController.State, autoHideAfter: TimeInterval? = nil) {
+        pillLog.append(state)
+        overlay.show(state, autoHideAfter: autoHideAfter)
+    }
+
     private func showWords(_ words: String, generation gen: Int) {
         guard generation == gen, mode != .idle, !words.isEmpty else { return }
-        overlay.show(.recording(mode: RefineMode.title(forProfile: profile), words: words))
+        pill(.recording(mode: RefineMode.title(forProfile: profile), words: words))
     }
 
     private func transcriptionFailed(_ error: Error, generation gen: Int) {
         guard generation == gen else { return }
         NSLog("QuickScribe: transcription failed: \(error.localizedDescription)")
-        overlay.show(.error("Apple speech recognition isn't available right now."), autoHideAfter: 3.0)
+        pill(.error("Apple speech recognition isn't available right now."), autoHideAfter: 3.0)
     }
 
     private func resolveFinalText(_ transcript: String, generation gen: Int) {
@@ -312,14 +335,15 @@ final class SessionController {
         var raw = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         // A mic that never rose above the floor heard nothing, so anything the
         // recognizer made of that noise must not be inserted.
-        if capture.sessionWasFullySilent || raw.isEmpty {
+        let heardNothing = silentSessionOverride ?? capture.sessionWasFullySilent
+        if heardNothing || raw.isEmpty {
             if modePickedThisSession {
                 announceProfile()
-            } else if capture.sessionWasFullySilent {
+            } else if heardNothing {
                 let device = capture.activeDevice.map { " (device: \($0.name))" } ?? ""
-                overlay.show(.error("Couldn't hear you. Check your mic\(device)."), autoHideAfter: 3.0)
+                pill(.error("Couldn't hear you. Check your mic\(device)."), autoHideAfter: 3.0)
             } else {
-                overlay.show(.error("Nothing captured"), autoHideAfter: 1.5)
+                pill(.error("Nothing captured"), autoHideAfter: 1.5)
             }
             return
         }
@@ -339,9 +363,9 @@ final class SessionController {
     private func polishAndInsert(raw: String) {
         let gen = generation
         let prof = profile
-        let spent = releaseAt.map { Date().timeIntervalSince($0) } ?? 0
+        let spent = releaseAt.map { clock().timeIntervalSince($0) } ?? 0
         let step = PolishPlanner.firstStep(raw: raw, tidied: TextCleanup.tidy(raw),
-                                           modelReady: AppleCleaner.unavailableReason() == nil,
+                                           modelReady: appleModelReadyOverride ?? (AppleCleaner.unavailableReason() == nil),
                                            budget: AppInfo.ttiBudget(utteranceSeconds: captureSeconds),
                                            spent: spent)
         guard case .askModel(let timeout, let tidied) = step else {
@@ -368,33 +392,33 @@ final class SessionController {
         guard !insertOnce else { return }   // exactly-once guarantee
         insertOnce = true
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            overlay.show(.error("Nothing usable to insert"), autoHideAfter: 2.0)
+            pill(.error("Nothing usable to insert"), autoHideAfter: 2.0)
             return
         }
-        switch InsertionTarget.current() {
+        switch targetReader() {
         case .textField: break
         case .notText:
-            showClipboardResult(Insertion.copy(text))
+            showClipboardResult(copyWriter(text))
             return
         case .unsure:
-            showClipboardResult(Insertion.pasteAndKeep(text))
+            showClipboardResult(pasteKept(text))
             return
         }
-        Insertion.insert(text) { [weak self] ok, lostImages in
+        textInserter(text) { [weak self] ok, lostImages in
             guard let self else { return }
             if ok {
-                self.overlay.show(degraded ? .degraded : .inserted, autoHideAfter: 1.4)
+                self.pill(degraded ? .degraded : .inserted, autoHideAfter: 1.4)
                 if lostImages {
                     NSLog("QuickScribe: clipboard image could not be restored (accepted edge case)")
                 }
             } else {
-                self.overlay.show(.error("Insert failed. Check Accessibility permission."), autoHideAfter: 2.5)
+                self.pill(.error("Insert failed. Check Accessibility permission."), autoHideAfter: 2.5)
             }
         }
     }
 
     private func showClipboardResult(_ ok: Bool) {
-        overlay.show(ok ? .copied : .error("Couldn't copy to the clipboard."), autoHideAfter: 2.0)
+        pill(ok ? .copied : .error("Couldn't copy to the clipboard."), autoHideAfter: 2.0)
     }
 
     // Expose overlay + hotkey start to the app delegate.
@@ -404,3 +428,11 @@ final class SessionController {
     func activate() -> Bool { hotkeys.start() }
     func showOverlay(_ s: OverlayController.State, autoHide: TimeInterval? = nil) { overlay.show(s, autoHideAfter: autoHide) }
 }
+
+/// Apple's on-device cleanup model behind a seam, so tests can see whether
+/// cleanup was asked at all and what it made of the budget.
+protocol Cleaning: Sendable {
+    func clean(_ text: String, instructions: String) async throws -> String
+}
+
+extension AppleCleaner: Cleaning {}
