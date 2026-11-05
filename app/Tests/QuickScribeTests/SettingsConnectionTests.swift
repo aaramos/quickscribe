@@ -131,7 +131,8 @@ final class SettingsConnectionTests: XCTestCase {
     }
 
     /// Layout check: every Custom service control sits inside the window with
-    /// room to read. Set QS_SETTINGS_SHOTS to a folder to save a picture.
+    /// room to read, controls do not overlap, and labels are drawn on screen.
+    /// Set QS_SETTINGS_SHOTS to a folder to save a picture.
     func testWindowIsLaidOutCorrectly() throws {
         addressField.stringValue = service.baseURL
         commit(addressField)
@@ -139,17 +140,31 @@ final class SettingsConnectionTests: XCTestCase {
         commit(keyField)
         speechChoice_selectCustom()
         let win = try! XCTUnwrap(settings.window)
-        let rootFrame = win.contentView!.bounds
-        for control in ([addressField, keyField] as [NSTextField]) + combos + popups + [testButton] {
-            let frame = control.convert(control.bounds, to: win.contentView!)
+        let content = win.contentView!
+        let rootFrame = content.bounds
+        let controls: [NSView] = ([addressField, keyField] as [NSTextField]) + combos + popups + [testButton]
+        for control in controls {
+            let frame = control.convert(control.bounds, to: content)
             XCTAssertTrue(rootFrame.contains(frame), "\(type(of: control)) outside the window: \(frame) in \(rootFrame)")
             XCTAssertGreaterThan(frame.width, 40, "control too narrow: \(frame)")
+            XCTAssertGreaterThan(frame.height, 16, "control too short: \(frame)")
         }
+        // Neighbours must not sit on top of each other.
+        for (i, a) in controls.enumerated() {
+            for b in controls.dropFirst(i + 1) {
+                let fa = a.convert(a.bounds, to: content), fb = b.convert(b.bounds, to: content)
+                XCTAssertFalse(fa.intersects(fb), "\(type(of: a)) overlaps \(type(of: b)): \(fa) vs \(fb)")
+            }
+        }
+        // The section headings and notes are visible somewhere in the window.
+        let visible = all(NSTextField.self, in: content).filter { !$0.isHidden }
+        XCTAssertTrue(visible.contains { $0.stringValue == "Custom service" }, "heading missing")
+        XCTAssertTrue(visible.contains { $0.stringValue.contains("Apple's on-device models") }, "default explanation missing")
         XCTAssertGreaterThan(rootFrame.height, 700, "window too short for the new section")
         if let folder = ProcessInfo.processInfo.environment["QS_SETTINGS_SHOTS"] {
             // A photo needs the real key field, but a secure field draws dots anyway.
-            guard let rep = win.contentView!.bitmapImageRepForCachingDisplay(in: win.contentView!.bounds) else { return }
-            win.contentView!.cacheDisplay(in: win.contentView!.bounds, to: rep)
+            guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+            content.cacheDisplay(in: content.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/settings.png"))
         }
     }
