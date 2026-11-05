@@ -50,9 +50,16 @@ public final class PromptLibrary {
         if tokens > maxTokens { throw PromptProblem.tooLong(tokens: tokens) }
     }
 
-    public func prompt(_ mode: String) -> String {
-        if mode == FactoryPrompts.rewriteID { return FactoryPrompts.rewrite }
-        return overrides[mode] ?? FactoryPrompts.all[mode] ?? FactoryPrompts.polish
+    /// Apple's short prompts fit Apple's model; a general service gets the
+    /// longer sidecar set. A person's own prompt for a mode wins on BOTH
+    /// routes, because it is their wording, not our tuning.
+    public func prompt(_ mode: String, route: CleanupRoute = .apple) -> String {
+        if mode == FactoryPrompts.rewriteID {
+            return route == .service ? ServicePrompts.rewrite : FactoryPrompts.rewrite
+        }
+        if let custom = overrides[mode] { return custom }
+        if route == .service { return ServicePrompts.all[mode] ?? ServicePrompts.polish }
+        return FactoryPrompts.all[mode] ?? FactoryPrompts.polish
     }
 
     public func entries() -> [PromptEntry] { Self.labels.compactMap { entry($0.id) } }

@@ -495,11 +495,3 @@ final class SessionController {
     func activate() -> Bool { hotkeys.start() }
     func showOverlay(_ s: OverlayController.State, autoHide: TimeInterval? = nil) { overlay.show(s, autoHideAfter: autoHide) }
 }
-
-/// Apple's on-device cleanup model behind a seam, so tests can see whether
-/// cleanup was asked at all and what it made of the budget.
-protocol Cleaning: Sendable {
-    func clean(_ text: String, instructions: String) async throws -> String
-}
-
-extension AppleCleaner: Cleaning {}
