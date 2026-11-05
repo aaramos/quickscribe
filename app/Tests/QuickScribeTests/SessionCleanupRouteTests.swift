@@ -258,10 +258,18 @@ final class SessionCleanupRouteTests: XCTestCase {
             }
         }
     }
+    func testTheQuestionStemSaysWhatTheRuleSaw() {
+        // The rule fires when a question mark is lost, including a request
+        // returned as a command: dropped, not answered.
+        XCTAssertEqual(SessionController.guardRefusalWhy(.answeredTheQuestion), "Cleanup dropped the question.")
+        let why = SessionController.SessionNotice.cleanupFailed(SessionController.guardRefusalWhy(.answeredTheQuestion))
+        XCTAssertTrue(why.display(copied: false).hasPrefix("Cleanup dropped the question."))
+    }
 }
 
 /// One SSE chat body: a content delta, a stop line, and [DONE].
 private func qsSSE(_ content: String) -> String {
     "data: {\"choices\":[{\"delta\":{\"content\":\"\(content)\"}}]}\n\n"
         + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+
 }

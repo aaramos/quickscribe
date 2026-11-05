@@ -519,7 +519,7 @@ final class SessionController {
         case .changedNumbers: return "Cleanup changed a number."
         case .addedMoney: return "Cleanup added money."
         case .addedTimeOfDay: return "Cleanup added a time of day."
-        case .answeredTheQuestion: return "Cleanup answered the question."
+        case .answeredTheQuestion: return "Cleanup dropped the question."
         case .emptied: return "Cleanup gave nothing."
         case .droppedTooMuch, .grewTooMuch, .rewordedTooMuch: return "Cleanup changed the wording."
         case .addedASentence: return "Cleanup added words."
