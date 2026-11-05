@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import XCTest
 @testable import QuickScribe
@@ -5,10 +6,9 @@ import XCTest
 
 /// Cleanup routing inside a real session: the fake service answers chat, and
 /// every outcome (reply, refusal, outage, bad key) must keep the words. Also
-/// the pure route choice and the failure wording it feeds to the person.
+/// the pure route choice, the notice wording, and the pill it has to fit in.
 @MainActor
 final class SessionCleanupRouteTests: XCTestCase {
-
     private var session: SessionController!
     private var service: FakeService!
     private var secrets: ReadKeyOnce!
@@ -79,16 +79,21 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertEqual(SessionController.cleanupRoute(settings: EndpointSettings(useCustomCleanup: true)), .apple,
                        "Custom without an address stays Apple")
     }
+
     func testFailureNoticesArePlainAndTellYouNothingWasLost() {
-        let key = SessionController.cleanupFailureNotice(EndpointError.unauthorized)
-        XCTAssertTrue(key.contains("refused the key"), key)
-        XCTAssertTrue(key.hasSuffix("Your words were inserted as typed."), key)
-        let time = SessionController.cleanupFailureNotice(DeadlinePassed())
-        XCTAssertTrue(time.contains("did not answer in time"), time)
-        let other = SessionController.cleanupFailureNotice(NSError(domain: "x", code: 1))
-        XCTAssertTrue(other.contains("cleanup service failed"), other)
-        for n in [key, time, other] { XCTAssertFalse(n.contains("\u{2014}"), n) }
+        XCTAssertEqual(SessionController.cleanupFailureWhy(EndpointError.unauthorized), "Bad API key.")
+        XCTAssertEqual(SessionController.cleanupFailureWhy(EndpointError.notReached("Connection 1 failed: bad host.")),
+                       "Can't reach the service.", "the OS's own text stays out of the pill")
+        XCTAssertEqual(SessionController.cleanupFailureWhy(EndpointError.serverError(503)), "Service error 503.")
+        XCTAssertEqual(SessionController.cleanupFailureWhy(DeadlinePassed()), "Cleanup timed out.")
+        XCTAssertEqual(SessionController.cleanupFailureWhy(NSError(domain: "x", code: 1)), "Cleanup failed.")
+        XCTAssertTrue(SessionController.SessionNotice.cleanupFailed("Bad API key.").display(copied: false)
+                      .hasSuffix("Your words went in."))
+        XCTAssertTrue(SessionController.SessionNotice.cleanupFailed("Bad API key.").display(copied: true)
+                      .hasSuffix("Your words copied to the clipboard."),
+                      "nothing claims the words were inserted when they were copied")
     }
+
     func testServiceCleanupReceivesTheServicePromptAndKeepsTheReply() async throws {
         chooseServiceCleanup()
         let cleaned = "The invoice is 1200 due Friday"   // minus the period: a real edit the guard allows
@@ -105,31 +110,44 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertEqual(session.pillLog.last, .inserted, "a service reply is a clean cleanup, not degraded")
         XCTAssertEqual(secrets.reads, 1, "the key is read for the route that uses it")
     }
+
     func testServiceCleanupFailureFallsBackToTidiedWordsAndSaysWhy() async {
         chooseServiceCleanup()
         service.queue(service.text("nope", status: 500), forPath: "/v1/chat/completions")
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.", "the words survive a cleanup outage")
         guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
-        XCTAssertTrue(notice.contains("code 500"), notice)
-        XCTAssertTrue(notice.contains("inserted as typed"), notice)
+        XCTAssertTrue(notice.contains("Service error 500."), notice)
+        XCTAssertTrue(notice.contains("Your words went in."), notice)
     }
+
     func testUnreachableAddressGivesAClearMessageAndKeepsTheWords() async {
         store.save(EndpointSettings(address: "http://127.0.0.1:9/v1", cleanupModel: "tidier",
                                     useCustomCleanup: true))
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.")
         guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
-        XCTAssertTrue(notice.contains("Could not reach the address."), notice)
+        XCTAssertTrue(notice.contains("Can't reach the service."), notice)
     }
+
     func testWrongKeyNamesTheKey() async {
         chooseServiceCleanup()
         service.queue(service.text("denied", status: 401), forPath: "/v1/chat/completions")
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.")
         guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
-        XCTAssertTrue(notice.contains("refused the key"), notice)
+        XCTAssertTrue(notice.contains("Bad API key."), notice)
     }
+
+    func testWrongPathNamesThePath() async {
+        store.save(EndpointSettings(address: service.baseURL + "/wrong-base", cleanupModel: "tidier",
+                                    useCustomCleanup: true))
+        await runRelease()
+        XCTAssertEqual(inserted, "The invoice is 1200 due Friday.")
+        guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
+        XCTAssertTrue(notice.contains("Wrong service path."), notice)
+    }
+
     func testGuardRejectionOnTheServiceRouteStaysQuietAndLosesNothing() async {
         chooseServiceCleanup()
         // A reply with an invented number: the same guard Apple's route uses
@@ -140,6 +158,7 @@ final class SessionCleanupRouteTests: XCTestCase {
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.")
         XCTAssertEqual(session.pillLog.last, .degraded)
     }
+
     func testAppleRouteStillUsesTheShortAppleSet() async {
         final class Note: Cleaning, @unchecked Sendable {
             private let lock = NSLock()
@@ -151,15 +170,16 @@ final class SessionCleanupRouteTests: XCTestCase {
         }
         let note = Note()
         session.appleModelReadyOverride = true
-        session.cleaner = note       // override stands in for whichever cleaner the route picks
+        session.cleaner = note
         store.save(EndpointSettings())  // everything Apple
         await runRelease()
         XCTAssertEqual(note.instructions, library.prompt(session.profile, route: .apple))
         XCTAssertEqual(secrets.reads, 0, "the Apple cleanup route never reads the Keychain")
     }
+
     func testRewriteRunsOnBothRoutes() async throws {
-        // The ⌃⌘⇧ profile over the service: FactoryPrompts.rewrite's text is
-        // what the old sidecar sent, so it must arrive as a system prompt.
+        // The ⌃⌘⇧ profile over the service: the old sidecar's Rewrite text is
+        // what a service gets as its system prompt.
         store.save(EndpointSettings(address: service.baseURL, cleanupModel: "tidier", useCustomCleanup: true))
         session.selectProfile("rewrite")
         service.queue(service.text(qsSSE("The invoice is 1200 due Friday")),
@@ -171,6 +191,7 @@ final class SessionCleanupRouteTests: XCTestCase {
         let messages = try XCTUnwrap(json["messages"] as? [[String: String]])
         XCTAssertEqual(messages[0]["content"], ServicePrompts.rewrite)
     }
+
     func testServiceAnswerPastApplesBudgetWindowIsStillUsedUpToItsOwnDeadline() async {
         // A 5 s clip leaves Apple's planner 0.1 s here; the answer takes 0.3 s
         // and lands. The service runs on the flat deadline, not the leftover.
@@ -182,26 +203,53 @@ final class SessionCleanupRouteTests: XCTestCase {
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday")
     }
+
     func testServiceAnswerSlowerThanTheFlatDeadlineFallsBackWithANotice() async {
-        let saved = SessionController.serviceCleanupTimeout
         SessionController.serviceCleanupTimeout = 0.2
-        defer { SessionController.serviceCleanupTimeout = saved }
         chooseServiceCleanup()
         service.queue(service.text(qsSSE("late words"), delay: 0.6), forPath: "/v1/chat/completions")
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday.", "past the limit, the words are the person's own")
         guard case .error(let notice)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
-        XCTAssertTrue(notice.contains("did not answer in time"), notice)
+        XCTAssertTrue(notice.contains("Cleanup timed out."), notice)
     }
+
     func testSpentBudgetStillAsksTheService() async {
         // Apple's planner stops asking once its budget is gone; a service has
         // its own window, so the request must still leave the Mac.
         chooseServiceCleanup()
-        session.clock = { self.base.addingTimeInterval(9.9) }   // 9.9 s past a 10 s clip's release
+        session.clock = { self.base.addingTimeInterval(9.9) }
         service.queue(service.text(qsSSE("The invoice is 1200 due Friday")), forPath: "/v1/chat/completions")
         await runRelease()
         XCTAssertEqual(inserted, "The invoice is 1200 due Friday")
         XCTAssertNotNil(service.received.first { $0.path == "/v1/chat/completions" })
+    }
+
+    /// One pill line at the pill's own font, for every sentence a session can
+    /// show. If this fails, the notice must be reworded, not the pill widened.
+    func testEveryNoticeFitsThePill() {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        let notices: [SessionController.SessionNotice] = [
+            .reason("Over the 5-minute limit. Apple speech answered."),
+            .reason("The clip came out empty. Apple speech answered."),
+            .speechFellBack,
+            .cleanupFailed(SessionController.cleanupFailureWhy(DeadlinePassed())),
+            .cleanupFailed(SessionController.cleanupFailureWhy(EndpointError.unauthorized)),
+            .cleanupFailed(SessionController.cleanupFailureWhy(EndpointError.notReached("the OS's longest plausible sentence about a socket."))),
+            .cleanupFailed(SessionController.cleanupFailureWhy(EndpointError.notFound("speech"))),
+            .cleanupFailed(SessionController.cleanupFailureWhy(EndpointError.serverError(500))),
+            .cleanupFailed(SessionController.cleanupFailureWhy(EndpointError.truncated)),
+            .cleanupFailed(SessionController.cleanupFailureWhy(NSError(domain: "x", code: 1))),
+        ]
+        for notice in notices {
+            for copied in [false, true] {
+                let text = notice.display(copied: copied)
+                let width = NSAttributedString(string: text, attributes: [.font: font]).size().width
+                XCTAssertLessThanOrEqual(width, OverlayController.messageTextBudget,
+                                         "\(text) measures \(Int(width))px")
+                XCTAssertFalse(text.contains("\u{2014}"), text)
+            }
+        }
     }
 }
 

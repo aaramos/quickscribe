@@ -46,7 +46,31 @@ final class SessionController {
     /// A one-line notice (a failed service, the length limit) that must stay
     /// readable after the words land. It becomes the final pill instead of
     /// being stamped over by "Inserted".
-    private var pendingNotice: String?
+    /// A sentence the session may owe the person once the words land. Stems
+    /// are short by rule: one pill line, no operating system error text. The
+    /// tail depends on where the words actually went, so the sentence can
+    /// never contradict the pill it replaces.
+    enum SessionNotice: Equatable {
+        /// Why a route changed or refused; nothing was lost.
+        case reason(String)
+        /// Custom speech failed and Apple's words carried the session.
+        case speechFellBack
+        /// Custom cleanup failed at the short reason, e.g. "Bad API key."
+        case cleanupFailed(String)
+
+        nonisolated func display(copied: Bool) -> String {
+            switch self {
+            case .reason(let why):
+                return copied ? "\(why) Copied to clipboard." : why
+            case .speechFellBack:
+                return copied ? "Your speech service failed. Apple's words copied to the clipboard."
+                              : "Your speech service failed. Used Apple's words."
+            case .cleanupFailed(let why):
+                return copied ? "\(why) Your words copied to the clipboard." : "\(why) Your words went in."
+            }
+        }
+    }
+    private var pendingNotice: SessionNotice?
 
     // MARK: - Test seams
     // The paths below reach the keyboard, the clipboard, Apple's model and
@@ -241,9 +265,9 @@ final class SessionController {
     static func speechRoute(customChosen: Bool, overflowed: Bool, silent: Bool,
                             hasClip: Bool) -> SpeechRoute {
         guard customChosen else { return .appleOnly("") }
-        if overflowed { return .appleOnly("Recording passed the 5-minute service limit. This one used Apple speech.") }
+        if overflowed { return .appleOnly("Over the 5-minute limit. Apple speech answered.") }
         if silent { return .appleOnly("") }                       // nothing to hear; never upload silence
-        if !hasClip { return .appleOnly("The recording came out empty, so Apple speech answered.") }
+        if !hasClip { return .appleOnly("The clip came out empty. Apple speech answered.") }
         return .customService
     }
 
@@ -278,7 +302,7 @@ final class SessionController {
                                      silent: silent,
                                      hasClip: (clip?.data.count ?? 0) > 44)
         if case .appleOnly(let why) = route {
-            pendingNotice = why.isEmpty ? nil : why
+            pendingNotice = why.isEmpty ? nil : .reason(why)
             speechTask = Task { [weak self] in
                 guard let self else { return }
                 defer { if self.generation == gen { self.speechTask = nil } }   // never drop a newer session's task
@@ -328,7 +352,7 @@ final class SessionController {
                 } else {
                     // The notice goes last, so it stays readable, and the
                     // failed upload does not spend the cleanup budget.
-                    self.pendingNotice = "Your speech service failed. Used Apple's words."
+                    self.pendingNotice = .speechFellBack
                     self.releaseAt = self.clock()
                     self.resolveFinalText(fallback ?? "", generation: gen)
                 }
@@ -395,7 +419,7 @@ final class SessionController {
                 announceProfile()
             } else if let why = pendingNotice {
                 pendingNotice = nil
-                pill(.error(why), autoHideAfter: 3.5)
+                pill(.error(why.display(copied: false)), autoHideAfter: 3.5)
             } else if heardNothing {
                 let device = capture.activeDevice.map { " (device: \($0.name))" } ?? ""
                 pill(.error("Couldn't hear you. Check your mic\(device)."), autoHideAfter: 3.0)
@@ -463,7 +487,7 @@ final class SessionController {
                     // Never a lost word, but the person learns why the line
                     // landed unpolished. Guard refusals stay quiet on purpose:
                     // they are routine and the words are exactly the person's.
-                    self.pendingNotice = Self.cleanupFailureNotice(failure)
+                    self.pendingNotice = .cleanupFailed(Self.cleanupFailureWhy(failure))
                 }
                 self.carryOut(PolishPlanner.stepAfterModel(output: nil, tidied: tidied, mode: prof))
             }
@@ -479,13 +503,26 @@ final class SessionController {
                                model: settings.cleanupModel)
     }
 
-    /// A plain sentence: what went wrong, and that nothing was lost.
-    nonisolated static func cleanupFailureNotice(_ error: Error) -> String {
-        let why: String
-        if error is DeadlinePassed { why = "Your cleanup service did not answer in time." }
-        else if let e = error as? EndpointError { why = e.message }
-        else { why = "Your cleanup service failed." }
-        return "\(why) Your words were inserted as typed."
+    /// The short reason half of a cleanup notice. Deliberately NOT
+    /// EndpointError.message: those carry detail (and the OS's own words)
+    /// that belongs in Settings, not on a one-line pill.
+    nonisolated static func cleanupFailureWhy(_ error: Error) -> String {
+        if error is DeadlinePassed { return "Cleanup timed out." }
+        if let e = error as? EndpointError {
+            switch e {
+            case .noAddress: return "No service address set."
+            case .badAddress: return "Bad service address."
+            case .notReached: return "Can't reach the service."
+            case .unauthorized: return "Bad API key."
+            case .notFound: return "Wrong service path."
+            case .serverError(let code): return "Service error \(code)."
+            case .timedOut: return "The service took too long."
+            case .invalidReply: return "Bad reply from the service."
+            case .emptyReply: return "The service answered nothing."
+            case .truncated: return "The answer was cut off."
+            }
+        }
+        return "Cleanup failed."
     }
 
     private func carryOut(_ step: PolishPlanner.Step) {
@@ -517,7 +554,7 @@ final class SessionController {
                 // up long enough to read.
                 if let why = self.pendingNotice {
                     self.pendingNotice = nil
-                    self.pill(.error(why), autoHideAfter: 3.0)
+                    self.pill(.error(why.display(copied: false)), autoHideAfter: 3.0)
                 } else {
                     self.pill(degraded ? .degraded : .inserted, autoHideAfter: 1.4)
                 }
@@ -536,7 +573,7 @@ final class SessionController {
             pendingNotice = nil
             // The notice stays readable, and the person still learns the
             // words landed on the clipboard rather than in the document.
-            pill(.error(ok ? "\(why) Copied to clipboard." : "Couldn't copy to the clipboard."),
+            pill(.error(ok ? why.display(copied: true) : "Couldn't copy to the clipboard."),
                  autoHideAfter: 3.0)
         } else {
             pill(ok ? .copied : .error("Couldn't copy to the clipboard."), autoHideAfter: 2.0)

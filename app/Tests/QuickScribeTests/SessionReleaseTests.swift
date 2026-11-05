@@ -232,8 +232,8 @@ final class SessionReleaseTests: XCTestCase {
         session.processRelease(customChosen: true, silent: false, live: live)
         await waitUntil { !self.session.pillLog.isEmpty && self.insertedAfter == nil && !self.copied.isEmpty }
         guard case .error(let text)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
-        XCTAssertTrue(text.contains("Used Apple's words."), text)
-        XCTAssertTrue(text.contains("Copied to clipboard."), text)
+        XCTAssertTrue(text.contains("Apple's words copied to the clipboard."), text)
+        XCTAssertTrue(text.contains("copied to the clipboard."), text)
         XCTAssertEqual(copied, ["Apple said this."])
     }
 

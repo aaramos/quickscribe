@@ -53,6 +53,9 @@ final class OverlayController {
     private static let height: CGFloat = 40
     private static let recordingHeight: CGFloat = 78
     private static let maxWidth: CGFloat = 520
+    /// What a single message line has to fit in at the pill's font: the panel
+    /// max minus the row's padding. Notices are written to this budget.
+    static let messageTextBudget: CGFloat = 460
     private static let gapBelowMenuBar: CGFloat = 8
 
     private let panel: NSPanel
