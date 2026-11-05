@@ -255,6 +255,59 @@ final class CleanupGuardTests: XCTestCase {
             input: "call me at three i will be up", mode: "polish"),
             "the verb exception covers the speaker, not the model's writing")
     }
+    func testFreeStandingMarkersNeedOneTheSpeakerWrote() {
+        // A marker that stands free of any number is still a claim of a time
+        // of day, and only the speaker's own free marker clears it.
+        XCTAssertFalse(CleanupGuard.accepts(output: "Let's meet on Friday p.m.",
+                                            input: "let's meet on friday", mode: "polish"),
+                       "p.m. after the weekday, tied to nothing")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 o'clock p.m. on Friday.",
+                                            input: "meet at three o'clock on friday", mode: "polish"),
+                       "p.m. a word away from the hour is free-standing")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 on Friday p.m.",
+                                            input: "meet at three on friday", mode: "polish"),
+                       "the marker ended up on the weekday's tail")
+        XCTAssertTrue(CleanupGuard.accepts(output: "The 3 p.m. call and the p.m. news.",
+                                           input: "the 3 p.m. call and the p.m. news", mode: "polish"),
+                      "tied stays tied, free stands on its own speaker-written twin")
+        // Word boundaries: "often" holds no ten, "someone" no one, so an
+        // answer left untouched is never stamped for a verb's am.
+        XCTAssertTrue(CleanupGuard.accepts(output: "It costs often. Am I right?",
+                                           input: "it costs often. am i right?", mode: "polish"),
+                      "the free am copies the speaker's own free am")
+    }
+
+    func testListShapesSuffixSignsAndAddedMoneyWords() {
+        // List shapes: the number under a heading is its own number.
+        XCTAssertFalse(CleanupGuard.accepts(output: "Item 3: $212 units.",
+                                            input: "item 3: 212 units.", mode: "polish"),
+                       "a colon with a space ends the phrase")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Item 3\n$212 units",
+                                            input: "item 3\n212 units", mode: "polish"),
+                       "a line break ends the phrase; lists are where this bites")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Room 3 - $212 today.",
+                                            input: "room 3 - 212 today", mode: "polish"),
+                       "a dash ends the phrase")
+        // A sign after the number is a sign on it; a money word in the
+        // answer is a claim just as much as the sign.
+        XCTAssertFalse(CleanupGuard.accepts(output: "The room number is 212€.",
+                                            input: "the room number is 212", mode: "polish"))
+        XCTAssertFalse(CleanupGuard.accepts(output: "The room number is 212 dollars.",
+                                            input: "the room number is 212", mode: "polish"),
+                       "'212 dollars' claims money as loudly as '$212' does")
+        // Goldens.
+        XCTAssertFalse(CleanupGuard.inventsCurrency(output: "The total is $50,000.",
+                                                    input: "fifty thousand dollars"),
+                       "a spelled number and a written one are the same number")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Meet at 3 and 5 p.m.",
+                                           input: "meet at three and five pm", mode: "polish"))
+        XCTAssertTrue(CleanupGuard.accepts(output: "Leave at 3:30 p.m.",
+                                           input: "leave at three thirty pm", mode: "polish"),
+                      "a colon between digits with no space stays one number")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Pay $5 and $6.",
+                                           input: "pay 5 dollars and 6 dollars", mode: "polish"))
+    }
+
 
 
 

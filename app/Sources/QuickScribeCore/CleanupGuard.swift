@@ -98,29 +98,38 @@ public enum CleanupGuard {
         "gbp", "cad", "aud", "jpy", "inr", "chf", "rmb", "bitcoin", "bitcoins",
     ]
 
-    /// One number in a text: the digits it stands for, and the characters
-    /// sitting right before it and right after it. A marker is judged against
-    /// its own number, never against the dictation as a whole: one said
-    /// dollar does not license a sign on the account number at the end.
+    /// One number in a text: the digits it stands for, and the slices of the
+    /// lowercased text sitting right before it and right after it, so a
+    /// marker found in the tail can be placed back in the text. A marker is
+    /// judged against its own number, never against the dictation as a
+    /// whole: one said dollar does not license the account number at the end.
     private struct Numeral {
-        let digits: String      // "4.2 million" and "fifty thousand" both arrive comparable
-        let head: String        // up to 4 characters before the number
-        let tail: String        // up to 30 after it
+        let digits: String      // "4.2 million" and "fifty thousand" arrive comparable
+        let end: String.Index   // where the number itself finishes, in the lowercased text
+        let head: Substring     // up to 4 characters before it
+        let tail: Substring     // up to 30 after it
     }
 
-    /// Number phrases: digit and number-word tokens with only plain gaps
-    /// between them ("four" then "million"; a sentence period separates).
-    /// Ordinals ("twelfth") are not in the list: a number written a shape we
-    /// cannot compare is a match in doubt, and doubt falls back.
+    /// Number tokens: written digits, spoken numbers, scale words. The words
+    /// keep their boundaries, or "often" holds a ten and "someone" a one;
+    /// the digits wear none on purpose, since "3pm" and "5dollars" are
+    /// shapes real answers write. Ordinals ("twelfth") are absent: a number
+    /// in a shape we cannot compare is a match in doubt, and doubt falls back.
     private static let numberToken = try! NSRegularExpression(
-        pattern: #"[0-9]+(?:[.,][0-9]+)*|one|two|three|four|five|six|seven|eight|nine|ten"#
-            + "|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
-            + "|twenty|thirty|forty|fifty|hundred|thousand|million|billion",
+        pattern: #"(?:\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"#
+            + "|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty"
+            + #"|thirty|forty|fifty|hundred|thousand|million|billion)\b"#
+            + #"|[0-9]+(?:[.,][0-9]+)*)"#,
         options: [.caseInsensitive])
 
     /// A marker pressed right against a number, on either side of it.
     private static let afterMarker = try! NSRegularExpression(
         pattern: #"^\s*[.,;:]?\s*([ap])([.\s]*)m\b\s*([a-z]*)"#, options: [.caseInsensitive])
+
+    /// Every a.m./p.m. shape standing as its own words, glued to a number or
+    /// not: "p.m.", "P.M.", "p m". "3pm" with no space is only ever spotted
+    /// by the pressed-against rule above, never twice.
+    private static let markerWord = try! NSRegularExpression(pattern: #"\b([ap])([.\s]*)m\b"#)
 
     private static func numerals(in text: String) -> [Numeral] {
         let lower = text.lowercased()
@@ -128,26 +137,41 @@ public enum CleanupGuard {
         var runs: [(String.Index, String.Index)] = []
         for match in found {
             guard let r = Range(match.range, in: lower) else { continue }
-            if let last = runs.last,
-               !lower[last.1..<r.lowerBound].contains(where: { $0.isLetter || $0 == "." || $0 == "," }) {
-                runs[runs.count - 1].1 = r.upperBound            // same spoken number
-            } else {
-                runs.append((r.lowerBound, r.upperBound))
+            if let last = runs.last {
+                let gap = lower[last.1..<r.lowerBound]
+                let plainSpace = !gap.isEmpty && gap.allSatisfy { $0 == " " || $0 == "\t" }
+                let digitColon = gap == ":"
+                    && last.1 > lower.startIndex && lower[lower.index(before: last.1)].isNumber
+                    && r.lowerBound < lower.endIndex && lower[r.lowerBound].isNumber
+                if plainSpace || digitColon {
+                    runs[runs.count - 1].1 = r.upperBound            // same spoken number
+                    continue
+                }
             }
+            runs.append((r.lowerBound, r.upperBound))
+            // A line break, a dash, a spaced colon, or a sign between tokens
+            // ends the phrase: "3: 212" and "3 - 212" and a number under a
+            // heading are two numbers, each judged on its own.
         }
         return runs.map { start, end in
             let headStart = lower.index(start, offsetBy: -4, limitedBy: lower.startIndex) ?? lower.startIndex
             let tailEnd = lower.index(end, offsetBy: 30, limitedBy: lower.endIndex) ?? lower.endIndex
             return Numeral(digits: digitString(String(lower[start..<end])),
-                           head: String(lower[headStart..<start]),
-                           tail: String(lower[end..<tailEnd]))
+                           end: end,
+                           head: lower[headStart..<start],
+                           tail: lower[end..<tailEnd])
         }
     }
 
+    private static func isSymbol(_ c: Character) -> Bool {
+        c.unicodeScalars.first.map(currencySymbols.contains) ?? false
+    }
+
+    /// A sign on its number, before or after: "$212" and "212€" wear it.
     private static func hasSymbolOn(_ n: Numeral) -> Bool {
-        n.head.last(where: { !$0.isWhitespace }).map {
-            $0.unicodeScalars.first.map(currencySymbols.contains) ?? false
-        } ?? false
+        if let before = n.head.last(where: { !$0.isWhitespace }), isSymbol(before) { return true }
+        if let after = n.tail.first(where: { !$0.isWhitespace }), isSymbol(after) { return true }
+        return false
     }
 
     private static func currencyWordAfter(_ n: Numeral) -> Bool {
@@ -155,13 +179,15 @@ public enum CleanupGuard {
         return currencyWords.contains(token)
     }
 
-    /// Which marker stands right after a number, a or p, or none. On the
-    /// speaker's side, the verb is not a marker: "three am I right" says no
-    /// a.m., and "I am" never said one either. On the written side every am
-    /// glues itself to its hour and claims a time, doubt included: an answer
-    /// the guard drops falls back to the person's own words, which is cheap.
-    private static func markerOn(_ n: Numeral, allowingVerbException: Bool) -> Character? {
-        let tail = n.tail
+    /// The marker pressed against a number: which kind, and where it starts
+    /// inside the tail so it can be recognised again in a full scan. On the
+    /// speaker's side the verb is not a marker: "three am I right" says no
+    /// a.m. On the written side every am glues itself to its hour and
+    /// claims a time, doubt included: the fallback to the person's own
+    /// words costs nothing.
+    private static func attachedMarker(_ n: Numeral,
+                                       allowingVerbException: Bool) -> (kind: Character, offset: Int)? {
+        let tail = String(n.tail)
         guard let m = afterMarker.firstMatch(in: tail, range: NSRange(tail.startIndex..., in: tail)),
               let kindR = Range(m.range(at: 1), in: tail),
               let middleR = Range(m.range(at: 2), in: tail),
@@ -171,37 +197,65 @@ public enum CleanupGuard {
         if allowingVerbException, kind == "a", !tail[middleR].contains("."), tail[nextR] == "i" {
             return nil
         }
-        return kind
+        return (kind, tail.distance(from: tail.startIndex, to: kindR.lowerBound))
     }
 
-    /// A dollar sign must ride the number that was spoken with money.
+    /// A text's markers in two sorts: tied to a number, with that number's
+    /// digits, and free-standing words. An answer may tie a marker only
+    /// where its own number earned it, and may write a free marker only
+    /// where the speaker wrote one free. Attached lookups on the answer
+    /// side refuse a verb's am; the speaker's side keeps the exception.
+    private static func markers(in text: String,
+                                allowingVerbException: Bool) -> (tied: [(digits: String, kind: Character)], free: [Character]) {
+        let lower = text.lowercased()
+        var tied: [(digits: String, kind: Character)] = []
+        var attachedAt: Set<String.Index> = []
+        for n in numerals(in: text) {
+            guard let m = attachedMarker(n, allowingVerbException: allowingVerbException) else { continue }
+            tied.append((n.digits, m.kind))
+            attachedAt.insert(lower.index(n.end, offsetBy: m.offset))
+        }
+        var free: [Character] = []
+        for m in markerWord.matches(in: lower, range: NSRange(lower.startIndex..., in: lower)) {
+            guard let kindR = Range(m.range(at: 1), in: lower),
+                  !attachedAt.contains(kindR.lowerBound)
+            else { continue }
+            free.append(lower[kindR].first!)
+        }
+        return (tied, free)
+    }
+
+    /// A dollar sign, or a money word, must ride the number that was spoken
+    /// with money: an answer's "212 dollars" is a claim just as much as
+    /// "212€" or "$212" is.
     static func inventsCurrency(output: String, input: String) -> Bool {
-        let signs = numerals(in: output).filter(hasSymbolOn)
-        guard !signs.isEmpty else { return false }
+        let marked = numerals(in: output).filter { hasSymbolOn($0) || currencyWordAfter($0) }
+        guard !marked.isEmpty else { return false }
         let given = numerals(in: input)
-        return signs.contains { n in
+        return marked.contains { n in
             !given.contains { m in
                 m.digits == n.digits && (hasSymbolOn(m) || currencyWordAfter(m))
             }
         }
     }
 
-    /// A model that has seen "three on Friday" loves to hand back "3 p.m.",
-    /// and the reader cannot tell the invented half from the real one. Each
-    /// marker is allowed only on the number that was spoken wearing that same
-    /// kind: a stated a.m. does not clear a written p.m., and "tonight" or
-    /// "in the morning" says neither word.
+    /// A model that has seen "three on Friday" loves to hand back "3 p.m."
+    /// or "Friday p.m.", and the reader cannot tell the invented half from
+    /// the real one. Each tied marker needs its own digits wearing the same
+    /// kind; a stated a.m. does not clear a written p.m., not on this hour
+    /// or any other. Each free-standing marker needs the speaker to have
+    /// written one free-standing too: "tonight" and "in the morning" say
+    /// neither word, and an hour said bare stays bare.
     public static func inventsTimeOfDay(output: String, input: String) -> Bool {
-        let written = numerals(in: output).compactMap { n in
-            markerOn(n, allowingVerbException: false).map { (n.digits, $0) }
+        let written = markers(in: output, allowingVerbException: false)
+        let given = markers(in: input, allowingVerbException: true)
+        for claim in written.tied {
+            if !given.tied.contains(where: { $0.digits == claim.digits && $0.kind == claim.kind }) { return true }
         }
-        guard !written.isEmpty else { return false }
-        let given = numerals(in: input)
-        return written.contains { digits, kind in
-            !given.contains { m in
-                m.digits == digits && markerOn(m, allowingVerbException: true) == kind
-            }
+        for kind in written.free {
+            if !given.free.contains(kind) { return true }
         }
+        return false
     }
 
     private static func words(_ text: String) -> [String] {
