@@ -24,7 +24,7 @@ Notes:
   as the backstop; its own unit tests cover 3pm, 3 p.m., 3:00 PM, the
   dotted form after a spelled hour, a spoken p.m. passing, and "I am"
   never counting as a marker in either direction.
-- 15 of the 80 runs were stamps for a different, older reason: t2 is a
+- 18 of the 80 runs were stamps for a different, older reason: t2 is a
   question and the Concise and Active Voice answers mostly returned it as
   a plain command ("Pick up the prescription"), which the question rule
   has always refused. The tidied words went in instead, and the pill now

@@ -5,12 +5,13 @@ the person's tidied words are inserted instead. The service route ran a local
 instruction model over the loopback address, warmed, one request at a time.
 
 FIRE THE FALLBACK  (per mode, 50 dictations each; final numbers, guard with
-per-number money and time rules, every honesty check in)
+per-number money and time rules, free-standing markers, list shapes and
+suffix signs, every honesty check in)
   mode              apple    apple caught   service   service caught   errors
-  Polish            10.0%             5     6.0%                 3      0
-  Concise           22.0%            11     10.0%                5      0
-  Active Voice      24.0%            12     12.0%                6      0
-  Rewrite           18.0%             9     10.0%                5      0
+  Polish            10.0%             5     8.0%                 4      0
+  Concise           22.0%            11     14.0%                7      0
+  Active Voice      24.0%            12     14.0%                7      0
+  Rewrite           18.0%             9      8.0%                4      0
 
 TIMING (seconds per cleanup, median, service warm)
   apple    0.5    0.5    0.6    0.4
@@ -20,11 +21,18 @@ Notes:
 - The service set needs no new limits: its refusal rate sits BELOW Apple's in
   every mode, and no rate climbed above the reviewer's own Apple rerun
   (12.0 / 24.0 / 24.0 / 18.0), so none is proposed.
-- Three reruns happened as the guard grew: after the currency rule, after
-  the a.m./p.m. rule with dot folding, and this one with every sign and
-  marker tied to its own number. Apple's numbers have held at 10.0 / 22.0 /
-  24.0 / 18.0 across the last two; the service moves by one or two items per
-  rerun between identical code, which is ordinary sampling for this model.
+- Four reruns happened as the guard grew: after the currency rule, after
+  the a.m./p.m. rule with dot folding, after per-number tying, and this one
+  with free-standing markers, list shapes, suffix signs and added money
+  words in. Apple's numbers have held at 10.0 / 22.0 / 24.0 / 18.0 across
+  the last three, exactly matching the reviewer's own Apple rerun band; the
+  service moves by one or two items per rerun between identical code, which
+  is ordinary sampling for this model. The service's extra catches since the
+  last table are all d05 and d22, and both are honest refusals: the answer
+  turned a spoken "twelfth" into a written "12", a comparison the guard
+  cannot make (doubt refuses, the person's words stand), and an answer that
+  returned a question as a command, the oldest rule of all. No marker
+  misfire appears in any row.
 - Inserted rows are, by construction, rows the per-number rules passed, and
   a search of this run's output found no symbol or marker the dictation had
   not earned. Where the review's own wrong answers (a sign moved onto an
