@@ -88,7 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// assumed a dialog and silently activated a dead tap. Now: open the
     /// pane ONCE, poll, and show honest state throughout (icon + overlay).
     private func ensureAccessibility() {
+        // Setup logging: a re-granted Accessibility grant once went unconfirmed on
+        // screen, so each step leaves a short trace. No personal details.
+        NSLog("QuickScribe: accessibility at launch: \(AXIsProcessTrusted() ? "granted" : "not granted")")
         if session.activate() {
+            NSLog("QuickScribe: hotkeys started at launch")
             applyIcon(animated: false, dimmed: cleanupDown)
             statusItem.button?.toolTip = readyTip
             rebuildMenu()
@@ -96,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         overlayWarn("Accessibility off, so hotkeys are disabled. Enable \(AppInfo.displayName) in System Settings.")
         openAccessibilityPaneOnce()
+        NSLog("QuickScribe: waiting timer started (checks every 2 s)")
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
             Task { @MainActor in
                 guard let self = self else { t.invalidate(); return }
@@ -104,13 +109,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // be reading shut, and the poll ran forever).
                 guard AXIsProcessTrusted() else { return }
                 t.invalidate()
+                NSLog("QuickScribe: accessibility grant noticed")
                 if self.session.activate() {
+                    NSLog("QuickScribe: hotkeys started after grant")
                     self.applyIcon(animated: false, dimmed: self.cleanupDown)
                     self.statusItem.button?.toolTip = self.readyTip
                     self.overlayWarn("Hotkeys live ✓  Hold \(AppInfo.holdLabel) to talk", autoHideAfter: 3)
                 } else {
                     // Trusted but tap refused (tccd cache race): force an
                     // app relaunch so the grant is re-evaluated fresh.
+                    NSLog("QuickScribe: hotkeys did NOT start after grant — relaunch needed")
                     self.overlayWarn("Permission recorded. Relaunch \(AppInfo.displayName) to turn on hotkeys.", autoHideAfter: 5)
                 }
                 self.rebuildMenu()
