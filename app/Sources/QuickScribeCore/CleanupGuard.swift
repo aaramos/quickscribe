@@ -92,15 +92,24 @@ public enum CleanupGuard {
     /// pm, or one pressed against a digit. The verb in "I am" matches none of
     /// them, and "3 am I right" is a question glued to the hour, not a.m.:
     /// a.m. never stands before "I".
+    // Hours as speech writes them, for the bare "three am" shape. An open
+    // letter run would read steam and cream as clock times: only a real hour
+    // word or a digit may hold an am.
+    private static let hourWords = "(?:one|two|three|four|five|six|seven|eight|nine|ten|"
+        + "eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+        + "|twenty|thirty|forty|fifty|[0-9]{1,2})"
+
     private static let spokenTimeMarker = try! NSRegularExpression(
-        pattern: #"\b[ap][.\s]+m\b|\bpm\b|[0-9]\s*a\s*m\b(?!\s+[Ii]\b)|[0-9]\s*p\s*m\b"#,
+        pattern: #"\b[ap][.\s]+m\b|\bpm\b"# + #"|\b"# + hourWords + #"\s*a\s*m\b(?!\s+[Ii]\b)"#
+            + #"|\b"# + hourWords + #"\s*p\s*m\b"#,
         options: [.caseInsensitive])
 
     /// A time of day written onto the answer: the same shapes, plus the hour
     /// word worn onto am ("three am"), which speech writes without a digit.
     /// The verb after "I" ("3 am I right", "I am") is never a shape.
     private static let writtenTimeSuffix = try! NSRegularExpression(
-        pattern: #"\b[ap][.\s]+m\.?\b|\bpm\b|[0-9]\s*p\s*m\b|\b(?:[a-hj-z]+|[0-9]+)\s*a\s*m\b(?!\s+[Ii]\b)"#,
+        pattern: #"\b[ap][.\s]+m\.?\b|\bpm\b"# + #"|\b"# + hourWords + #"\s*a\s*m\b(?!\s+[Ii]\b)"#
+            + #"|\b"# + hourWords + #"\s*p\s*m\b"#,
         options: [.caseInsensitive])
 
     /// A model that has seen "three on Friday" loves to hand back "3 p.m.",

@@ -167,6 +167,21 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertFalse(CleanupGuard.accepts(output: "I am 3pm on the dot.",
                                             input: "i am on the dot at three", mode: "polish"),
                        "a real invented 3pm is stamped even beside a verb am")
+        // Words that merely END in the letters a-m are not clocks.
+        XCTAssertFalse(CleanupGuard.inventsTimeOfDay(output: "Tell the team the launch is in July.",
+                                                     input: "tell the team the launch is in july"),
+                       "t-eam is not a.m.; the guard must not blink at letters")
+        XCTAssertFalse(CleanupGuard.inventsTimeOfDay(output: "Maybe ice cream, the pistachio one.",
+                                                     input: "maybe ice cream the pistachio one"),
+                       "cr-eam is not a.m. either")
+        // Speech that writes the hour as a word still says am or pm, and both
+        // directions of that get read.
+        XCTAssertTrue(CleanupGuard.accepts(output: "The 3 a.m. report is late.",
+                                           input: "the three am report is late", mode: "concise"),
+                      "an hour word before am counts as saying it")
+        XCTAssertFalse(CleanupGuard.accepts(output: "The three a.m. report is late.",
+                                            input: "the report is late at three", mode: "concise"),
+                       "and an invented teen-hour marker is still stamped")
         // A clock reading spoken in words: spaced p m marks and o'clock.
         XCTAssertTrue(CleanupGuard.accepts(output: "The 4 p.m. report is late for the 4 pm report from four pm.",
                                            input: "the four o'clock report is late for the four p m report from four p m",
