@@ -55,4 +55,58 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertTrue(output.string.contains("3"), output.string)
         XCTAssertFalse(output.string.lowercased().contains("um so"), output.string)
     }
+    func testPromptTestRunsTheSelectedRoute() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
+        let library = PromptLibrary(fileURL: url)
+        let settings = makeSettings(library: library)
+        settings.show()
+        defer { settings.window?.close() }
+        let root = try XCTUnwrap(settings.window?.contentView)
+        let editor = try XCTUnwrap(all(NSTextView.self, in: root).first { $0.string == FactoryPrompts.polish })
+        var seen: [(route: CleanupRoute, prompt: String)] = []
+        settings.promptTester = { route, _, instructions, _, _ in
+            seen.append((route, instructions)); return "done"
+        }
+        let test = button("Test Prompt", root)
+        func run() async throws {
+            test.performClick(nil)
+            for _ in 0..<150 where !test.isEnabled {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            XCTAssertTrue(test.isEnabled, "Test Prompt never finished")
+        }
+
+        try await run()
+        XCTAssertEqual(seen.last?.route, .apple)
+        XCTAssertEqual(seen.last?.prompt, FactoryPrompts.polish)
+
+        // Cleanup switched to Custom: the test follows the route and its
+        // longer factory set, even though the editor never changed. An
+        // address must be set first: Custom without one stays Apple.
+        let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
+        address.stringValue = "http://127.0.0.1:1234/v1"
+        address.sendAction(address.action!, to: address.target)
+        let popups = all(NSPopUpButton.self, in: root)
+        XCTAssertEqual(popups.count, 2, "expected speech and cleanup pickers only")
+        let cleanup = popups[1]
+        cleanup.selectItem(at: 1)
+        cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        try await run()
+        XCTAssertEqual(seen.last?.route, .service)
+        XCTAssertEqual(seen.last?.prompt, ServicePrompts.polish,
+                       "the service route tests its own factory set")
+
+        // A saved prompt of the person's own wins on both routes.
+        editor.string = "My own words."
+        editor.delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: editor))
+        button("Save", root).performClick(nil)
+        for pick in [0, 1] {
+            cleanup.selectItem(at: pick)
+            cleanup.sendAction(cleanup.action!, to: cleanup.target)
+            try await run()
+            XCTAssertEqual(seen.last?.route, pick == 0 ? .apple : .service)
+            XCTAssertEqual(seen.last?.prompt, "My own words.")
+        }
+    }
+
 }

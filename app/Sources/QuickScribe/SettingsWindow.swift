@@ -12,7 +12,6 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
     private(set) var window: NSWindow?
     private let library: PromptLibrary
     private let endpointStore: EndpointSettingsStore
-    private let cleaner = AppleCleaner()
     private var drafts = PromptDrafts()
     private var modeID = RefineMode.all[0].id
 
@@ -108,25 +107,52 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         }
     }
 
+    /// Seam for tests: (route, sample, instructions, settings, key) → the model's reply.
+    var promptTester: ((CleanupRoute, String, String, EndpointSettings, String?) async throws -> String)?
+
     @objc private func testTapped() {
         testButton.isEnabled = false
         testOutput.string = "Running…"
         let sample = TextCleanup.tidy(sampleInput.string)
-        let prompt = editor.string
-        let cleaner = cleaner
+        let settings = endpointStore.load()
+        let route = settings.cleanupUsesEndpoint ? CleanupRoute.service : CleanupRoute.apple
+        // The test runs the same prompt the NEXT dictation would use: the
+        // draft if edited, a saved custom prompt, else the factory text of
+        // the route that is actually selected.
+        let entry = drafts.entry(modeID)
+        let instructions = (drafts.isDirty(modeID) || entry?.custom == true)
+            ? editor.string : library.prompt(modeID, route: route)
         Task { [weak self] in
+            guard let self else { return }
             let message: String
             do {
-                try PromptLibrary.validate(prompt)
-                if let reason = AppleCleaner.unavailableReason() { throw TestProblem(message: reason) }
-                message = try await cleaner.clean(sample, instructions: prompt)
+                try PromptLibrary.validate(instructions)
+                let run = self.promptTester ?? Self.runPromptTest
+                message = try await run(route, sample, instructions, settings, self.endpointStore.apiKey())
             } catch let failure as CleanupFailure {
                 message = Self.explain(failure)
+            } catch let failure as EndpointError {
+                message = failure.message
             } catch {
                 message = (error as? TestProblem)?.message ?? error.localizedDescription
             }
-            self?.testOutput.string = message
-            self?.testButton.isEnabled = true
+            self.testOutput.string = message
+            self.testButton.isEnabled = true
+        }
+    }
+
+    /// One cleanup on the route that is selected, through the same code a
+    /// dictation would take: Apple's model, or the service with its address,
+    /// key and cleanup model name.
+    static func runPromptTest(_ route: CleanupRoute, _ sample: String, _ instructions: String,
+                              _ settings: EndpointSettings, _ key: String?) async throws -> String {
+        switch route {
+        case .apple:
+            if let reason = AppleCleaner.unavailableReason() { throw TestProblem(message: reason) }
+            return try await AppleCleaner().clean(sample, instructions: instructions)
+        case .service:
+            let client = OpenAICompatClient(settings: settings, apiKey: key, timeout: 120)
+            return try await client.clean(text: sample, model: settings.cleanupModel, systemPrompt: instructions)
         }
     }
 
