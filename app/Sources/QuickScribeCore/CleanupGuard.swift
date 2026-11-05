@@ -80,10 +80,9 @@ public enum CleanupGuard {
 
     private static func foldTimeDots(_ text: String) -> String {
         var folded = text
-        for (dotted, plain) in [("a.m.", "am"), ("p.m.", "pm")] {
-            folded = folded.replacingOccurrences(of: dotted, with: plain, options: .caseInsensitive)
-            folded = folded.replacingOccurrences(of: dotted.replacingOccurrences(of: ".", with: ". "),
-                                                 with: plain, options: .caseInsensitive)
+        for dotted in ["a.m.", "a. m.", "p.m.", "p. m."] {
+            folded = folded.replacingOccurrences(of: dotted, with: dotted.first == "a" ? "am" : "pm",
+                                                 options: .caseInsensitive)
         }
         return folded
     }
@@ -283,13 +282,9 @@ public enum CleanupGuard {
     public static func inventsTimeOfDay(output: String, input: String) -> Bool {
         let written = markers(in: output, allowingVerbException: false)
         let given = markers(in: input, allowingVerbException: true)
-        for claim in written.tied {
-            if !given.tied.contains(where: { $0.digits == claim.digits && $0.kind == claim.kind }) { return true }
-        }
-        for kind in written.free {
-            if !given.free.contains(kind) { return true }
-        }
-        return false
+        return written.tied.contains { claim in
+                   !given.tied.contains { $0.digits == claim.digits && $0.kind == claim.kind }
+               } || written.free.contains { !given.free.contains($0) }
     }
 
     private static func words(_ text: String) -> [String] {
