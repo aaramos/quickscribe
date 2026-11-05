@@ -1,0 +1,34 @@
+Prompt line against invented times of day, before and after.
+
+The two temptations from the ticket:
+  t1: Um so let's meet at two, actually three on Friday, and the plan
+      was approved by Dana.
+  t2: The pharmacy closes at nine tonight, so could you pick up the
+      prescription and some aspirin on your way home?
+5 runs, all four modes, both routes: 80 cleanups, service warm, one
+request at a time on the shared server.
+
+ANSWERS THAT TRIED TO WRITE A TIME OF DAY THE SPEAKER NEVER SAID
+  mode              apple    service
+  Polish            0/5      0/5
+  Concise           0/5      0/5
+  Active Voice      0/5      0/5
+  Rewrite           0/5      0/5
+(times per sentence: 10 runs per mode per route, all zero)
+
+INVENTED TIMES THAT REACHED TEXT: 0 of 80.
+
+Notes:
+- The prompt line alone holds: not one answer even reached for am or pm,
+  so the guard's new rule was never needed on these sentences. It stays
+  as the backstop; its own unit tests cover 3pm, 3 p.m., 3:00 PM, the
+  dotted form after a spelled hour, a spoken p.m. passing, and "I am"
+  never counting as a marker in either direction.
+- 15 of the 80 runs were stamps for a different, older reason: t2 is a
+  question and the Concise and Active Voice answers on both routes
+  returned it as a plain command ("Pick up the prescription"), which the
+  question rule has always refused. The tidied words went in instead,
+  with no notice noise and no invented time.
+- Regenerate with: apple-eval clean <corpus.json> <variant> and the
+  service_<variant> forms, environment naming address, model and key.
+  Raw run output is not kept here.
