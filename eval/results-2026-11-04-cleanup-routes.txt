@@ -31,6 +31,11 @@ Notes:
   account number, a p.m. built from another hour's a.m., a marker read
   across a sentence break) are fed to the guard directly, every one is
   refused: those are the tests.
+- Rewrite's service line moved from 3 to 5 items against the previous run.
+  The two additions are honest catches, not new teeth misfiring: an answer
+  invented a weekday the speaker never named ("after three on Friday"), and
+  one reworded past what Rewrite's word budget allows. Both fall inside
+  what this rule exists to refuse.
 - All failures were the guard rejecting a changed number, an added marker or
   a dropped word; there were no connection or key errors in any run.
 - Regenerate any row with: cleanup-eval clean <corpus.json> <variant> (and the

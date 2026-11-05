@@ -250,6 +250,10 @@ final class CleanupGuardTests: XCTestCase {
                                            input: "meet at three pm friday", mode: "polish"))
         XCTAssertTrue(CleanupGuard.accepts(output: "I am meeting Dana at 3 on Friday.",
                                            input: "i am meeting dana at three on friday", mode: "polish"))
+        XCTAssertFalse(CleanupGuard.accepts(
+            output: "Call me at 3 am I will be up.",
+            input: "call me at three i will be up", mode: "polish"),
+            "the verb exception covers the speaker, not the model's writing")
     }
 
 
