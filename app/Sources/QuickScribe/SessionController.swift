@@ -323,7 +323,7 @@ final class SessionController {
         let windDown = Task { () -> String? in try? await live.finish() }
         speechTask = Task { [weak self] in
             guard let self else { return }
-                defer { if self.generation == gen { self.speechTask = nil } }   // never drop a newer session's task
+            defer { if self.generation == gen { self.speechTask = nil } }   // never drop a newer session's task
             do {
                 // The key is read from the Keychain only for the route that
                 // actually sends anything.
