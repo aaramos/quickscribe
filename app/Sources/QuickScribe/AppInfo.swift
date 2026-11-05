@@ -1,13 +1,20 @@
 import Foundation
 
 /// SINGLE PLACE for app identity. build_app.sh reads these constants to generate
-/// Info.plist. Its own name and bundle id keep its permissions and data apart from
-/// the original QuickScribe.
+/// Info.plist. The bundle id stays the one from the first release, so people who
+/// installed that one keep their permissions and settings.
 enum AppInfo {
-    static let displayName = "QuickScribe Native"
+    static let displayName = "QuickScribe"
     static let bundleID = "local.quickscribe.native"
 
-    /// Both apps listen for the same hotkey, so running them together would paste twice.
+    /// The only version number. build_app.sh reads it into the app's Info.plist.
+    static let version = "2.0"
+
+    /// Earlier releases showed as "QuickScribe Native" and kept their data in a
+    /// folder named after that. DataMigration moves it on first launch.
+    static let legacyDataFolderName = "QuickScribe Native"
+
+    /// Both apps share the hotkey, so running them together would paste twice.
     static let originalBundleID = "local.quickscribe"
 
     static var dataFolder: URL {
