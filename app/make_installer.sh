@@ -6,6 +6,8 @@ cd "$(dirname "$0")"
 ./build_app.sh
 
 APP_NAME=$(sed -n 's/.*static let displayName = "\(.*\)"/\1/p' Sources/QuickScribe/AppInfo.swift)
+SIGN_NOTE=$(codesign -dvv "build/${APP_NAME}.app" 2>&1 | sed -n 's/^Authority=//p' | head -1)
+echo "==> installer will carry: ${SIGN_NOTE:-an ad-hoc signature}"
 DMG="build/${APP_NAME// /-}.dmg"
 STAGE=$(mktemp -d)
 trap 'rm -rf "${STAGE:?}"' EXIT
@@ -39,9 +41,11 @@ short notice on screen and the menu grows an "Update available: version X" item 
 links to the release page; the icon itself does not change. The app never downloads or
 installs anything itself. To update: quit the app, download
 the new disk image from the release page, drag the app to Applications to replace the
-old one, and reopen. macOS may ask for Microphone and Accessibility again after an
-update: switch them back on if the hotkeys stop working, and if a switch already looks
-on, turn it off and on again.
+old one, and reopen. Releases share one steady self-made signature, so an update is the
+same app to macOS. macOS may still ask for Microphone and Accessibility after an update:
+switch them back on if the hotkeys stop working, and if a switch already looks on, turn
+it off and on again. Coming from version 1.0, which had a throwaway signature, expect to
+grant permissions once more whatever you do.
 
 Your words stay on this Mac unless you turn on a custom service in Settings. With a
 custom address, only the routes you switch (speech, cleanup, or both) go to that

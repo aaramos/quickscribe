@@ -46,7 +46,7 @@ interrupts a dictation: if you are recording, it waits for a quiet moment. The a
 downloads or installs anything itself: you drag the new disk image to Applications when
 you choose. After an update macOS may ask for Microphone and Accessibility again; switch
 them back on if the hotkeys go quiet, and if a switch already looks on, turn it off and
-on again. Your settings and edited prompts survive the update.
+on again. Your settings and edited prompts survive the update. Releases carry one steady self-made signature, so an update is the same app to macOS; coming from v1.0, which had a throwaway signature, means granting permissions again once, whatever the signature.
 
 ## Your own service (optional)
 
@@ -103,7 +103,15 @@ cd app && ./build_app.sh
 ```
 
 The app lands in `app/build/QuickScribe.app`. To rename it, change `AppInfo.swift`.
-The installer disk image is built by `app/make_installer.sh`.
+The installer disk image is built by `app/make_installer.sh`. Both sign ad-hoc by
+default, so anyone can build from source with no certificate and nothing to set up.
 
-`eval/` compares Apple's speech and cleanup with the original QuickScribe on 50 scripted
-dictations, using Apple's text-to-speech voice. See `eval/README.md`.
+Releases share one steady self-made signature. `app/make_signing_identity.sh` creates a
+"QuickScribe Release" certificate in the login keychain once, free, with no Apple
+account; `CODESIGN_IDENTITY="QuickScribe Release" ./make_installer.sh` then builds with
+it. macOS recognizes updates from that identity as the same app, which is what lets
+permissions survive an update. It does not remove the first-open block, which only
+Apple's paid program can, and it changes no system trust settings.
+
+`eval/` runs 50 scripted dictations, spoken by Apple's text-to-speech voice, through
+the app's own speech and cleanup paths. See `eval/README.md`.
