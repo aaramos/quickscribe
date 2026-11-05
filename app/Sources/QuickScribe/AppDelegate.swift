@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// once per version, kept in UserDefaults under this key.
     private var availableUpdate: (version: String, page: URL)?
     private static let updateNotifiedKey = "UpdateNoticeVersion"
+    /// One session for the whole life of the app. Ephemeral stores nothing
+    /// on disk; keeping it alive lets the connection wind down on its own
+    /// instead of building and abandoning a stack every day.
+    private let updateSession = URLSession(configuration: .ephemeral)
     private var cleanupDown: Bool { cleanupProblem != nil }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -70,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let answer = await UpdateChecker.check(repo: AppInfo.githubRepo,
                                                    appName: AppInfo.displayName,
                                                    appVersion: AppInfo.version,
-                                                   session: URLSession(configuration: .ephemeral))
+                                                   session: updateSession)
             switch answer {
             case .newer(let version, let page):
                 self.availableUpdate = (version, page)
