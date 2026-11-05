@@ -18,6 +18,9 @@ final class FakeService: @unchecked Sendable {
         var body: Data
         /// seconds to wait before answering; for the timeout case
         var delay: TimeInterval = 0
+        /// promise more bytes than it sends, then drop the connection: a stream
+        /// that dies mid-reply, like a server restart between two chunks
+        var cutShort: Bool = false
     }
 
     private let listener: NWListener
@@ -157,11 +160,12 @@ final class FakeService: @unchecked Sendable {
             respond(conn, status: 404, contentType: "application/json", body: Data(#"{"error":"no rule for \#(path)"}"#.utf8), delay: 0)
             return
         }
-        respond(conn, status: rule.status, contentType: rule.contentType, body: rule.body, delay: rule.delay)
+        respond(conn, status: rule.status, contentType: rule.contentType, body: rule.body, delay: rule.delay, cutShort: rule.cutShort)
     }
 
-    private func respond(_ conn: NWConnection, status: Int, contentType: String, body: Data, delay: TimeInterval) {
-        let head = "HTTP/1.1 \(status) X\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+    private func respond(_ conn: NWConnection, status: Int, contentType: String, body: Data, delay: TimeInterval, cutShort: Bool = false) {
+        let promised = cutShort ? body.count + 512 : body.count
+        let head = "HTTP/1.1 \(status) X\r\nContent-Type: \(contentType)\r\nContent-Length: \(promised)\r\nConnection: close\r\n\r\n"
         func send() {
             var out = Data(head.utf8)
             out.append(body)

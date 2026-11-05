@@ -98,6 +98,45 @@ final class OpenAICompatClientTests: XCTestCase {
         }
     }
 
+    /// The lost-words case: a stream carrying a half answer that simply stops,
+    /// with no finish_reason and no [DONE]. Counting it as success would paste
+    /// a half sentence and call the dictation done.
+    func testStreamEndingWithNoProperCloseIsTruncated() async throws {
+        service.queue(service.text("data: {\"choices\":[{\"delta\":{\"content\":\"The total is\"}}]}\n\n",
+                                   contentType: "text/event-stream"), forPath: "/v1/chat/completions")
+        await XCTAssertThrowsErrorAsync(try await self.client.clean(text: "words", model: "m", systemPrompt: "p")) {
+            XCTAssertEqual($0 as? EndpointError, .truncated)
+        }
+    }
+
+    /// [DONE] counts as a proper close even when no finish_reason arrived.
+    func testDoneMarkerAloneClosesTheStream() async throws {
+        service.queue(service.text("data: {\"choices\":[{\"delta\":{\"content\":\"whole answer\"}}]}\n\ndata: [DONE]\n\n",
+                                   contentType: "text/event-stream"), forPath: "/v1/chat/completions")
+        let out = try await client.clean(text: "words", model: "m", systemPrompt: "p")
+        XCTAssertEqual(out, "whole answer")
+    }
+
+    /// Some servers write the frame without a space after the colon.
+    func testDataWithoutSpaceAfterColonParses() async throws {
+        service.queue(service.text("data:{\"choices\":[{\"delta\":{\"content\":\"no space\"}}]}\n\ndata:[DONE]\n\n",
+                                   contentType: "text/event-stream"), forPath: "/v1/chat/completions")
+        let out = try await client.clean(text: "words", model: "m", systemPrompt: "p")
+        XCTAssertEqual(out, "no space")
+    }
+
+    /// The link dying between chunks reports as a plain EndpointError, never a
+    /// raw URLSession error.
+    func testConnectionDroppedMidStreamIsAnEndpointError() async throws {
+        service.queue(FakeService.Rule(contentType: "text/event-stream",
+                                       body: Data("data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n".utf8),
+                                       cutShort: true), forPath: "/v1/chat/completions")
+        await XCTAssertThrowsErrorAsync(try await self.client.clean(text: "words", model: "m", systemPrompt: "p")) { error in
+            guard let e = error as? EndpointError else { return XCTFail("raw error leaked: \(error)") }
+            XCTAssertTrue(e.message.hasPrefix("Could not reach the address."), e.message)
+        }
+    }
+
     // MARK: - Status codes
 
     func test401MeansBadKey() async throws {

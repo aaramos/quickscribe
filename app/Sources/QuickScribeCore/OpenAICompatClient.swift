@@ -232,25 +232,36 @@ public struct OpenAICompatClient: Sendable {
         }
         var buffer = ""
         var finish: String?
+        var sawDone = false
         var sawDataLine = false
         var sawParseableChunk = false
-        for try await line in bytes.lines {
-            guard line.hasPrefix("data: ") else { continue }
-            let chunk = String(line.dropFirst(6))
-            if chunk.trimmingCharacters(in: .whitespaces) == "[DONE]" { break }
-            sawDataLine = true
-            guard let json = try? JSONSerialization.jsonObject(with: Data(chunk.utf8)) as? [String: Any],
-                  let choices = json["choices"] as? [[String: Any]],
-                  let choice = choices.first else { continue }
-            sawParseableChunk = true
-            if let reason = choice["finish_reason"] as? String { finish = reason }
-            if let delta = choice["delta"] as? [String: Any], let content = delta["content"] as? String {
-                buffer += content
+        do {
+            for try await line in bytes.lines {
+                // Servers may write "data: x" or "data:x"; both are the same frame.
+                guard line.hasPrefix("data:") else { continue }
+                let chunk = line.dropFirst("data:".count).drop(while: { $0 == " " })
+                if chunk.trimmingCharacters(in: .whitespaces) == "[DONE]" { sawDone = true; break }
+                sawDataLine = true
+                guard let json = try? JSONSerialization.jsonObject(with: Data(chunk.utf8)) as? [String: Any],
+                      let choices = json["choices"] as? [[String: Any]],
+                      let choice = choices.first else { continue }
+                sawParseableChunk = true
+                if let reason = choice["finish_reason"] as? String { finish = reason }
+                if let delta = choice["delta"] as? [String: Any], let content = delta["content"] as? String {
+                    buffer += content
+                }
             }
+        } catch {
+            // The link dropped mid-stream: report it like any other failure,
+            // not as a raw networking error.
+            throw Self.classify(status: nil, transport: error, what: "cleanup") ?? EndpointError.invalidReply
         }
         // Data lines that never parse as the expected shape are an invalid
         // reply; well-formed JSON with no content is an empty one.
         guard sawDataLine, sawParseableChunk else { throw EndpointError.invalidReply }
+        // A stream that ends with no finish_reason and no [DONE] was cut off.
+        // Counting its half-finished words as success would lose the rest.
+        if finish == nil && !sawDone { throw EndpointError.truncated }
         let out = Self.withoutLineEndSpaces(buffer.trimmingCharacters(in: .whitespacesAndNewlines))
         if out.isEmpty { throw EndpointError.emptyReply }
         if finish == "length" { throw EndpointError.truncated }
