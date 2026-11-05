@@ -23,10 +23,20 @@ let package = Package(
             dependencies: ["SpecCatch", "QuickScribeCore"],
             path: "Sources/QuickScribe"
         ),
-        .executableTarget(
-            name: "apple-eval",
+        .target(
+            name: "EvalSupport",
             dependencies: ["QuickScribeCore"],
-            path: "Sources/AppleEval"
+            path: "Sources/EvalSupport"
+        ),
+        .executableTarget(
+            name: "cleanup-eval",
+            dependencies: ["QuickScribeCore", "EvalSupport"],
+            path: "Sources/CleanupEval"
+        ),
+        .executableTarget(
+            name: "time-eval",
+            dependencies: ["QuickScribeCore", "EvalSupport"],
+            path: "Sources/TimeEval"
         ),
         .testTarget(
             name: "QuickScribeTests",

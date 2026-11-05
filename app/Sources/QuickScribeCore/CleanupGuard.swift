@@ -107,7 +107,7 @@ public enum CleanupGuard {
     /// and the reader cannot tell the invented half from the real one. An
     /// answer may write a.m./p.m. only where the speaker said one; "tonight"
     /// and "in the morning" are not saying it.
-    static func inventsTimeOfDay(output: String, input: String) -> Bool {
+    public static func inventsTimeOfDay(output: String, input: String) -> Bool {
         let range = NSRange(output.startIndex..., in: output)
         guard writtenTimeSuffix.firstMatch(in: output, range: range) != nil else { return false }
         let given = NSRange(input.startIndex..., in: input)

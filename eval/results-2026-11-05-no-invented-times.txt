@@ -29,6 +29,7 @@ Notes:
   returned it as a plain command ("Pick up the prescription"), which the
   question rule has always refused. The tidied words went in instead,
   with no notice noise and no invented time.
-- Regenerate with: apple-eval clean <corpus.json> <variant> and the
-  service_<variant> forms, environment naming address, model and key.
-  Raw run output is not kept here.
+- Regenerate with: time-eval (its own corpus lives in eval/time-corpus.json;
+  runs-per-mode and an alternate corpus path are its two optional
+  arguments). The service side runs when the environment names its address,
+  model and key, same as cleanup-eval. Raw run output is not kept here.

@@ -1,4 +1,5 @@
 import AVFoundation
+import EvalSupport
 import Foundation
 import QuickScribeCore
 
@@ -7,24 +8,16 @@ import QuickScribeCore
 // OpenAI-compatible server named entirely by the environment:
 //   QSE_BASE=<url> QSE_MODEL=<name> and QSE_KEY=<key> or QSE_KEYFILE=<json>
 // Usage:
-//   apple-eval speech <corpus.json> <audio-dir>               -> JSON lines
-//   apple-eval clean <corpus.json> <variant>                  -> JSON lines
+//   cleanup-eval speech <corpus.json> <audio-dir>               -> JSON lines
+//   cleanup-eval clean <corpus.json> <variant>                  -> JSON lines
 //       variants: rules | polish | concise | active_voice | rewrite
 //       ... or service_polish and friends, which run the person's service
-//   apple-eval limits
-//   apple-eval live <file.wav> ...
+//   cleanup-eval limits
+//   cleanup-eval live <file.wav> ...
 
-struct Item: Decodable { let id: String; let raw: String }
+let emit = evalEmit
 
-func corpus(_ path: String) throws -> [Item] {
-    try JSONDecoder().decode([Item].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-}
-
-func emit(_ row: [String: Any]) {
-    let data = try! JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
-    print(String(decoding: data, as: UTF8.self))
-    fflush(stdout)
-}
+func corpus(_ path: String) throws -> [Item] { try evalCorpus(path) }
 
 func transcribe(file: URL) async throws -> (String, Double, Double) {
     let audio = try AVAudioFile(forReading: file)
@@ -72,28 +65,8 @@ func instructions(_ variant: String) -> (String?, AppleCleaner.Filter) {
     }
 }
 
-/// "service_polish" checks the same guard as "polish".
-func guardMode(_ variant: String) -> String {
-    variant.hasPrefix("service_") ? String(variant.dropFirst("service_".count)) : variant
-}
-
-func serviceCleaner() -> any Cleaning {
-    let env = ProcessInfo.processInfo.environment
-    let address = env["QSE_BASE"] ?? ""       // no default: the person's server, named here
-    let model = env["QSE_MODEL"] ?? ""
-    var key = env["QSE_KEY"]
-    if key == nil, let keyPath = env["QSE_KEYFILE"], !keyPath.isEmpty {
-        let path = (keyPath as NSString).expandingTildeInPath
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let auth = json["auth"] as? [String: Any] {
-            key = auth["api_key"] as? String
-        }
-    }
-    let settings = EndpointSettings(address: address, cleanupModel: model, useCustomCleanup: true)
-    return EndpointCleaner(client: OpenAICompatClient(settings: settings, apiKey: key, timeout: 120),
-                           model: model)
-}
+func guardMode(_ variant: String) -> String { evalGuardMode(variant) }
+func serviceCleaner() -> any Cleaning { evalServiceCleaner() }
 
 func runClean(_ args: [String]) async throws {
     let variant = args[1]
@@ -190,5 +163,5 @@ case "speech": try await runSpeech(Array(arguments.dropFirst()))
 case "clean": try await runClean(Array(arguments.dropFirst()))
 case "limits": await runLimits()
 case "live": try await runLive(Array(arguments.dropFirst()))
-default: print("usage: apple-eval speech|clean|limits|live ...")
+default: print("usage: cleanup-eval speech|clean|limits|live ...")
 }

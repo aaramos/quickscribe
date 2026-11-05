@@ -16,7 +16,11 @@ The original QuickScribe's helper must be running on 127.0.0.1:8790 for `today.p
 python3 -c "import json,runpy; json.dump(runpy.run_path('eval/corpus.py')['C'], open('/tmp/qs/corpus.json','w'))"
 ```
 
-Then use `generate_audio.sh` for the audio, `apple-eval speech|clean|limits|live` and
-`today.py` for the runs (saved as `speech_*.jsonl` and `clean_*.jsonl`), and `score.py` for
-the table. `pipeline_corpus.py` feeds each engine's transcript to its own cleanup, which
-gives the end-to-end score.
+Then use `generate_audio.sh` for the audio and `today.py` for the runs (saved as
+`speech_*.jsonl` and `clean_*.jsonl`), and `score.py` for the table. The runners are
+package executables: `cleanup-eval speech|clean|limits|live` scores the main corpus
+(variants `rules`, `polish`, `concise`, `active_voice`, `rewrite`, and the `service_*`
+forms, whose server address, model and key the environment names), while `time-eval`
+runs the invented-time before/after experiment on its own two-sentence corpus,
+`time-corpus.json`. `pipeline_corpus.py` feeds each engine's transcript to its own
+cleanup, which gives the end-to-end score.

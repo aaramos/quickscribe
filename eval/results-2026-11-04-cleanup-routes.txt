@@ -26,6 +26,6 @@ Notes:
   inserted answers carry an invented currency sign.
 - All failures were the guard rejecting a changed number or a dropped word;
   there were no connection or key errors in any run.
-- Regenerate any row with: apple-eval clean <corpus.json> <variant> (and the
+- Regenerate any row with: cleanup-eval clean <corpus.json> <variant> (and the
   service_<variant> forms, whose address, model and key the environment names);
   corpus.json comes from eval/corpus.py. Raw run output is not kept here.
