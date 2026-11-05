@@ -57,6 +57,12 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>${APP_NAME} uses Apple's on-device speech recognition to turn your voice into text.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>${APP_NAME} pastes dictated text into the app you are using.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>${APP_NAME} reaches the speech and cleanup service you set in Settings, which may live on this Mac or your local network.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key> <true/>
+    </dict>
 </dict>
 </plist>
 PLIST
@@ -74,6 +80,7 @@ cat > "$ENT_FILE" <<ENT
 <dict>
     <key>com.apple.security.device.audio-input</key> <true/>
     <key>com.apple.security.automation.apple-events</key> <true/>
+    <key>com.apple.security.network.client</key> <true/>
 </dict>
 </plist>
 ENT
