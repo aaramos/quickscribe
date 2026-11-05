@@ -79,4 +79,16 @@ final class InsertionTargetTests: XCTestCase {
         XCTAssertEqual(InsertionTarget.classify(role: "AXWebArea", hasTextCursor: false), .unsure)
         XCTAssertEqual(InsertionTarget.classify(role: nil, hasTextCursor: false), .unsure)
     }
+    func testTheUpdateNoticeFitsThePill() {
+        // The sentence AppDelegate shows when GitHub says a release is newer.
+        // If that wording changes, this test's string must change with it.
+        let sentence = "Version 2.10 is out. Open the QuickScribe menu."
+        let text = NSAttributedString(string: sentence, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .medium),
+        ])
+        let width = text.size().width
+        XCTAssertLessThanOrEqual(width, OverlayController.messageTextBudget,
+                                 "the update notice is cut mid-word on the pill")
+    }
+
 }
