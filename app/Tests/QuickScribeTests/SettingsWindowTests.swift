@@ -13,10 +13,21 @@ final class SettingsWindowTests: XCTestCase {
         all(NSButton.self, in: root).first { $0.title == title }!
     }
 
+    /// Settings now owns the connection section too, so every test needs a store.
+    /// The suite name is throwaway and the secrets live in memory.
+    private func makeSettings(library: PromptLibrary) -> SettingsWindow {
+        let suite = "qs-settings-tests-\(UUID().uuidString)"
+        let store = EndpointSettingsStore(defaults: UserDefaults(suiteName: suite)!, secrets: MemorySecrets.Store())
+        addTeardownBlock {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        return SettingsWindow(library: library, endpointStore: store)
+    }
+
     func testEditSaveResetAndTryItOnSampleText() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
         let library = PromptLibrary(fileURL: url)
-        let settings = SettingsWindow(library: library)
+        let settings = makeSettings(library: library)
         settings.show()
         defer { settings.window?.close() }
         let root = try XCTUnwrap(settings.window?.contentView)
