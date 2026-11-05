@@ -42,6 +42,11 @@ final class SessionController {
     var releaseAt: Date?
     private var insertOnce = false              // guarantees insert happens exactly once
     private(set) var generation = 0             // invalidates in-flight work after cancel
+    /// A one-line notice (a failed service, the length limit) that must stay
+    /// readable after the words land. It becomes the final pill instead of
+    /// being stamped over by "Inserted".
+    private var pendingNotice: String?
+
     // MARK: - Test seams
     // The paths below reach the keyboard, the clipboard, Apple's model and
     // the clock, so every one of those sits behind a replaceable seam. The
@@ -180,6 +185,8 @@ final class SessionController {
             }
         }
         transcription = live
+        // A fresh session starts with no notice carried over.
+        pendingNotice = nil
         // Only a session whose speech route is the service keeps the whole
         // recording; Apple speech needs nothing beyond the live recognizer.
         armRecording()
@@ -264,15 +271,13 @@ final class SessionController {
                                      silent: silent,
                                      hasClip: (clip?.data.count ?? 0) > 44)
         if case .appleOnly(let why) = route {
+            pendingNotice = why.isEmpty ? nil : why
             speechTask = Task { [weak self] in
                 guard let self else { return }
                 defer { if self.generation == gen { self.speechTask = nil } }   // never drop a newer session's task
                 do {
                     let raw = try await live.finish()   // wind-down started at release; this only waits
                     guard self.generation == gen else { return }
-                    if !why.isEmpty {
-                        self.pill(.error(why), autoHideAfter: 3.5)
-                    }
                     self.resolveFinalText(raw, generation: gen)
                 } catch {
                     guard self.generation == gen else { return }
@@ -314,8 +319,10 @@ final class SessionController {
                     self.pill(.error("Your speech service failed, and Apple speech gave no words either."),
                               autoHideAfter: 3.5)
                 } else {
-                    self.pill(.error("Your speech service failed. Used Apple's words."), autoHideAfter: 3.0)
-                    self.releaseAt = self.clock()   // the failed upload spends none of it
+                    // The notice goes last, so it stays readable, and the
+                    // failed upload does not spend the cleanup budget.
+                    self.pendingNotice = "Your speech service failed. Used Apple's words."
+                    self.releaseAt = self.clock()
                     self.resolveFinalText(fallback ?? "", generation: gen)
                 }
             }
@@ -336,6 +343,7 @@ final class SessionController {
         speechTask?.cancel()          // stop the upload outright
         speechTask = nil
         recording?.discard()          // and free the audio
+        pendingNotice = nil           // a cancelled session tells no tales
         insertOnce = true             // a late finish must not insert anymore
         pill(.cancelled, autoHideAfter: 1.2)
         onPhaseChange?(false)
@@ -373,8 +381,14 @@ final class SessionController {
         // recognizer made of that noise must not be inserted.
         let heardNothing = silentSessionOverride ?? capture.sessionWasFullySilent
         if heardNothing || raw.isEmpty {
+            // A notice set for this session (the length limit) explains the
+            // emptiness better than a generic line, so it wins here too.
             if modePickedThisSession {
+                pendingNotice = nil
                 announceProfile()
+            } else if let why = pendingNotice {
+                pendingNotice = nil
+                pill(.error(why), autoHideAfter: 3.5)
             } else if heardNothing {
                 let device = capture.activeDevice.map { " (device: \($0.name))" } ?? ""
                 pill(.error("Couldn't hear you. Check your mic\(device)."), autoHideAfter: 3.0)
@@ -443,18 +457,35 @@ final class SessionController {
         textInserter(text) { [weak self] ok, lostImages in
             guard let self else { return }
             if ok {
-                self.pill(degraded ? .degraded : .inserted, autoHideAfter: 1.4)
+                // The notice, if this session earned one, is the message the
+                // person needs: it shows AFTER the words are in, and stays
+                // up long enough to read.
+                if let why = self.pendingNotice {
+                    self.pendingNotice = nil
+                    self.pill(.error(why), autoHideAfter: 3.0)
+                } else {
+                    self.pill(degraded ? .degraded : .inserted, autoHideAfter: 1.4)
+                }
                 if lostImages {
                     NSLog("QuickScribe: clipboard image could not be restored (accepted edge case)")
                 }
             } else {
+                self.pendingNotice = nil   // a failed insert has its own, more urgent news
                 self.pill(.error("Insert failed. Check Accessibility permission."), autoHideAfter: 2.5)
             }
         }
     }
 
     private func showClipboardResult(_ ok: Bool) {
-        pill(ok ? .copied : .error("Couldn't copy to the clipboard."), autoHideAfter: 2.0)
+        if let why = pendingNotice {
+            pendingNotice = nil
+            // The notice stays readable, and the person still learns the
+            // words landed on the clipboard rather than in the document.
+            pill(.error(ok ? "\(why) Copied to clipboard." : "Couldn't copy to the clipboard."),
+                 autoHideAfter: 3.0)
+        } else {
+            pill(ok ? .copied : .error("Couldn't copy to the clipboard."), autoHideAfter: 2.0)
+        }
     }
 
     // Expose overlay + hotkey start to the app delegate.

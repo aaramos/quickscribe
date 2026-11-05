@@ -199,6 +199,64 @@ final class SessionReleaseTests: XCTestCase {
 
     // MARK: - Fix 2: notices stay readable
 
+    func testFailureNoticeShowsAfterTheWordsLand() async {
+        chooseCustomSpeech()
+        armedClip()
+        failingTranscription()
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = false
+        let live = StubSpeech(.words("Apple said this."))
+        session.processRelease(customChosen: true, silent: false, live: live)
+        await waitUntil { self.session.pillLog.last != nil && self.insertedAtPillCount >= 0 }
+        // The insert happened first; the notice is the LAST pill state.
+        XCTAssertGreaterThan(session.pillLog.count, self.insertedAtPillCount,
+                             "fix 2: the notice may not be stamped over by the result pill")
+        XCTAssertEqual(session.pillLog.last,
+                       .error("Your speech service failed. Used Apple's words."))
+        // And it appeared only once: no earlier pill already said it and got
+        // buried by the insert.
+        let notice = OverlayController.State.error("Your speech service failed. Used Apple's words.")
+        XCTAssertEqual(session.pillLog.filter { $0 == notice }.count, 1)
+    }
+
+    func testNoticeSurvivesTheClipboardRoute() async {
+        chooseCustomSpeech()
+        armedClip()
+        failingTranscription()
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = false
+        session.targetReader = { .notText }
+        let live = StubSpeech(.words("Apple said this."))
+        session.processRelease(customChosen: true, silent: false, live: live)
+        await waitUntil { !self.session.pillLog.isEmpty && self.insertedAfter == nil && !self.copied.isEmpty }
+        guard case .error(let text)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
+        XCTAssertTrue(text.contains("Used Apple's words."), text)
+        XCTAssertTrue(text.contains("Copied to clipboard."), text)
+        XCTAssertEqual(copied, ["Apple said this."])
+    }
+
+    func testLimitNoticeShowsAfterInsertionNotBefore() async {
+        chooseCustomSpeech()
+        session.armRecording()
+        session.recording?.maxSeconds = 0.001          // any speech overflows immediately
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22_050)!
+        b.frameLength = 22_050
+        session.recording?.append(b)
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = false
+        let live = StubSpeech(.words("Apple heard all of it."))
+        session.processRelease(customChosen: true, silent: false, live: live)
+        await waitUntil { self.insertedAfter != nil }
+        XCTAssertEqual(service.received.filter { $0.path.contains("transcriptions") }.count, 0,
+                       "an over-limit recording is never uploaded")
+        guard case .error(let why)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
+        XCTAssertTrue(why.contains("limit"), why)
+    }
+
     func testNoNoticeKeepsThePlainPills() async {
         chooseAppleSpeech()
         session.appleModelReadyOverride = false
