@@ -7,8 +7,8 @@ import QuickScribeCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let prompts = PromptLibrary(fileURL: AppInfo.dataFolder.appendingPathComponent("prompts.json"))
-    private lazy var session = SessionController(prompts: prompts)
     private lazy var endpointStore = EndpointSettingsStore(secrets: KeychainSecrets(service: AppInfo.bundleID + ".endpoint"))
+    private lazy var session = SessionController(prompts: prompts, endpointStore: endpointStore)
     private lazy var settingsWindow = SettingsWindow(library: prompts, endpointStore: endpointStore)
 
     /// Icon A equalizer animation — runs ONLY while recording.
