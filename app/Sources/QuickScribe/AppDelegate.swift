@@ -69,16 +69,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let answer = await UpdateChecker.check(repo: AppInfo.githubRepo,
                                                    appName: AppInfo.displayName,
-                                                   appVersion: AppInfo.version) { request in
-                let (data, response) = try await URLSession.shared.data(for: request)
-                return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
-            }
+                                                   appVersion: AppInfo.version,
+                                                   session: URLSession(configuration: .ephemeral))
             switch answer {
             case .newer(let version, let page):
                 self.availableUpdate = (version, page)
-                if let notice = UpdateChecker.noticeVersion(for: answer,
-                                                            lastNotified: UserDefaults.standard
-                                                                .string(forKey: Self.updateNotifiedKey)) {
+                let busy = self.session.pillBelongsToDictation
+                if let notice = Self.updateNotice(answer,
+                                                  lastNotified: UserDefaults.standard
+                                                      .string(forKey: Self.updateNotifiedKey),
+                                                  sessionBusy: busy) {
                     UserDefaults.standard.set(notice, forKey: Self.updateNotifiedKey)
                     self.overlayWarn("Version \(notice) is out. Open the \(AppInfo.displayName) menu.",
                                      autoHideAfter: 5)
@@ -95,6 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("QuickScribe: update check did not reach GitHub")
             }
         }
+    }
+
+    /// A notice landing on the pill during a dictation buries the words the
+    /// person is watching and hides before anyone can read it. So while the
+    /// session is recording or finishing: nothing on the pill, and the
+    /// version is NOT marked as told, so a later check gets its turn at a
+    /// quiet moment. The menu item still appears now; a menu opens when the
+    /// person chooses, interrupting nothing.
+    nonisolated static func updateNotice(_ answer: UpdateChecker.Check, lastNotified: String?,
+                                         sessionBusy: Bool) -> String? {
+        guard !sessionBusy else { return nil }
+        return UpdateChecker.noticeVersion(for: answer, lastNotified: lastNotified)
     }
 
     @objc private func openReleasePage() {
