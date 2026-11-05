@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import QuickScribe
 @testable import QuickScribeCore
@@ -44,11 +45,13 @@ final class LiveEndpointCheckTests: XCTestCase {
         // on synthetic clips, not recorded dictation.
         if let wavPath = ProcessInfo.processInfo.environment["QSWIFT_WAV"],
            let d = FileManager.default.contents(atPath: (wavPath as NSString).expandingTildeInPath) {
-            let started = Date()
-            let text = try await client.transcribe(wav: d, model: audioModel)
-            print("MEASURE \(wavPath) seconds=\(String(format: "%.1f", Double(d.count - 44) / 32_000)) waited=\(String(format: "%.1f", Date().timeIntervalSince(started)))")
+            // Measure the WHOLE release path the app takes: feed the clip the
+            // way capture would, run processRelease (the finish() ordering
+            // from fix 4), and time until text reaches the inserter.
+            let (seconds, waited, text) = try await measureThroughRelease(wav: d, live: live, audioModel: audioModel)
+            print("MEASURE \(wavPath) seconds=\(String(format: "%.1f", seconds)) waited=\(String(format: "%.1f", waited))")
             print("TEXT \(text)")
-            return   // a measurement run: speech only
+            return   // a measurement run: this path only
         } else {
             let text = try await client.transcribe(wav: SettingsWindow.silenceWAV(), model: audioModel)
             print("LIVE speech reply chars:", text.count)  // words are NOT logged
@@ -69,5 +72,70 @@ final class LiveEndpointCheckTests: XCTestCase {
         } catch {
             XCTFail("cleanup: \((error as? EndpointError)?.message ?? "\(error)")")
         }
+    }
+
+    // MARK: - The full release path, end to end
+
+    /// A recognizer stub: the real mic is not involved in a file measurement.
+    private final class QuietSpeech: SpeechAccepting, @unchecked Sendable {
+        func append(_ buffer: AVAudioPCMBuffer) {}
+        func finish() async throws -> String { "" }
+        func cancel() {}
+    }
+
+    private final class InsertBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: String?
+        func got(_ text: String) { lock.lock(); stored = text; lock.unlock() }
+        var value: String? { lock.lock(); defer { lock.unlock() }; return stored }
+    }
+
+    @MainActor
+    private func measureThroughRelease(wav: Data, live: (base: String, key: String),
+                                       audioModel: String) async throws
+        -> (seconds: Double, waited: Double, text: String) {
+        let suite = "quickscribe.live.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set(live.base, forKey: "endpoint.address")
+        defaults.set(audioModel, forKey: "endpoint.speechModel")
+        defaults.set(true, forKey: "endpoint.useCustomSpeech")
+        let store = EndpointSettingsStore(defaults: defaults, secrets: MemorySecrets.Store(live.key))
+        let prompts = PromptLibrary(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("qs-live-\(UUID().uuidString).json"))
+        let session = SessionController(prompts: prompts, endpointStore: store)
+        session.silentSessionOverride = false
+        session.targetReader = { .textField }
+        let box = InsertBox()
+        session.textInserter = { text, done in box.got(text); done(true, false) }
+        session.transcription = QuietSpeech()
+        session.armRecording()
+        // Feed the clip the way capture would: real file buffers, half-second chunks.
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("qs-live-\(UUID().uuidString).wav")
+        try wav.write(to: tmp)
+        let file = try AVAudioFile(forReading: tmp)
+        let total = AVAudioFrameCount(file.length)
+        let chunk: AVAudioFrameCount = 22_050
+        var offset: AVAudioFrameCount = 0
+        while offset < total {
+            let n = min(chunk, total - offset)
+            let b = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: n)!
+            try file.read(into: b, frameCount: n)
+            session.recording?.append(b)
+            offset += n
+        }
+        try? FileManager.default.removeItem(at: tmp)
+        let start = Date()
+        session.processRelease(customChosen: true, silent: false, live: QuietSpeech())
+        let deadline = start.addingTimeInterval(60)
+        while box.value == nil && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let waited = Date().timeIntervalSince(start)
+        defaults.removePersistentDomain(forName: suite)
+        guard let text = box.value else {
+            XCTFail("nothing reached the inserter within 60 s")
+            return (Double(wav.count - 44) / 32_000, waited, "<none>")
+        }
+        return (Double(wav.count - 44) / 32_000, waited, text)
     }
 }
