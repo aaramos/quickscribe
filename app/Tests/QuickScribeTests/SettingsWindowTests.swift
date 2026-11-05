@@ -109,4 +109,48 @@ final class SettingsWindowTests: XCTestCase {
         }
     }
 
+    func testEditorShowsSavesAndResetsTheSelectedRouteFactory() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
+        let library = PromptLibrary(fileURL: url)
+        let settings = makeSettings(library: library)
+        settings.show()
+        defer { settings.window?.close() }
+        let root = try XCTUnwrap(settings.window?.contentView)
+        let editor = try XCTUnwrap(all(NSTextView.self, in: root).first { $0.string == FactoryPrompts.polish })
+        let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
+        address.stringValue = "http://127.0.0.1:1234/v1"
+        address.sendAction(address.action!, to: address.target)
+        let cleanup = all(NSPopUpButton.self, in: root)[1]
+        func choose(_ item: Int) {
+            cleanup.selectItem(at: item)
+            cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        }
+        func type(_ text: String) {
+            editor.string = text
+            editor.delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: editor))
+        }
+
+        choose(1)   // Custom cleanup
+        XCTAssertEqual(editor.string, ServicePrompts.polish, "the editor shows the route that runs")
+
+        type("Mine.")
+        choose(0)
+        XCTAssertEqual(editor.string, "Mine.", "unsaved typing survives a route flip")
+
+        button("Save", root).performClick(nil)
+        choose(0); XCTAssertEqual(editor.string, "Mine.")
+        choose(1); XCTAssertEqual(editor.string, "Mine.", "a custom prompt is the person's own on both routes")
+
+        button("Reset to Default", root).performClick(nil)
+        XCTAssertEqual(editor.string, ServicePrompts.polish, "reset returns the CURRENT route's factory")
+
+        // Typing Apple's factory while on the service route saves nothing custom:
+        // either route's factory text is still factory.
+        type(FactoryPrompts.polish)
+        button("Save", root).performClick(nil)
+        let status = all(NSTextField.self, in: root).first { $0.stringValue.contains("Factory default") }
+        XCTAssertNotNil(status, "matching any factory is not a custom prompt")
+        XCTAssertFalse(PromptLibrary(fileURL: url).entry("polish")?.custom ?? true)
+    }
+
 }

@@ -75,7 +75,9 @@ public final class PromptLibrary {
     public func save(_ mode: String, text: String) throws -> PromptEntry {
         guard let factory = FactoryPrompts.all[mode] else { throw PromptProblem.unknownMode }
         try Self.validate(text)
-        overrides[mode] = text == factory ? nil : text
+        // Either route's factory text is still factory: matching it saves
+        // nothing custom, so Reset and "Factory default" stay honest.
+        overrides[mode] = (text == factory || text == ServicePrompts.all[mode]) ? nil : text
         try persist()
         return entry(mode)!
     }

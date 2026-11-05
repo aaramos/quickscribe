@@ -60,8 +60,22 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         showCurrentMode()
     }
 
+    private var cleanupRoute: CleanupRoute {
+        endpointStore.load().cleanupUsesEndpoint ? .service : .apple
+    }
+
     private func showCurrentMode() {
-        editor.string = drafts.text(modeID)
+        // While a mode is factory text, the editor shows the factory of the
+        // route that cleanup actually uses: Apple's short Polish is not the
+        // starting point for a service, and saving either factory stays
+        // factory. A custom prompt is the person's own on both routes.
+        if drafts.isDirty(modeID) {
+            editor.string = drafts.text(modeID)
+        } else if let entry = drafts.entry(modeID), entry.custom {
+            editor.string = entry.prompt
+        } else {
+            editor.string = library.prompt(modeID, route: cleanupRoute)
+        }
         refreshStatus()
     }
 
@@ -202,6 +216,9 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
             }
         }
         refreshWordsOutWarning()
+        // The prompt editor shows the factory of the route cleanup now uses.
+        // Unsaved typing stays put (showCurrentMode keeps dirty drafts).
+        showCurrentMode()
         if s.isEnabled { fetchModels() } else { connectionStatus.stringValue = "" }
     }
 
