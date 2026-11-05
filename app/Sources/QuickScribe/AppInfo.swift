@@ -10,6 +10,10 @@ enum AppInfo {
     /// The only version number. build_app.sh reads it into the app's Info.plist.
     static let version = "2.0"
 
+    /// Where releases live. The update check reads this repo's latest release
+    /// and links to its page. It never downloads or installs anything.
+    static let githubRepo = "aaramos/quickscribe-native"
+
     /// Earlier releases showed as "QuickScribe Native" and kept their data in a
     /// folder named after that. DataMigration moves it on first launch.
     static let legacyDataFolderName = "QuickScribe Native"

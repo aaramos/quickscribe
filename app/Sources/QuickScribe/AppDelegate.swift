@@ -17,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var iconPhase: Double = 0
     /// Why AI cleanup can't run right now. Dictation still works without it.
     private var cleanupProblem: String?
+    /// A release newer than this app, when GitHub says so. The menu carries
+    /// it until the next check says we are level again; the pill says it
+    /// once per version, kept in UserDefaults under this key.
+    private var availableUpdate: (version: String, page: URL)?
+    private static let updateNotifiedKey = "UpdateNoticeVersion"
     private var cleanupDown: Bool { cleanupProblem != nil }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -44,6 +49,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.startReadinessMonitor()
             self.ensureAccessibility()
         }
+        startUpdateChecks()
+    }
+
+    // MARK: - Update notice
+
+    /// A question to GitHub at launch and once a day. It runs beside
+    /// dictation, never before it: nothing here gates a recording, and every
+    /// failure is a silent no, logged in one short line with no URL in it.
+    private func startUpdateChecks() {
+        runUpdateCheck()
+        Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.runUpdateCheck() }
+        }
+    }
+
+    private func runUpdateCheck() {
+        Task { [weak self] in
+            guard let self else { return }
+            let answer = await UpdateChecker.check(repo: AppInfo.githubRepo,
+                                                   appName: AppInfo.displayName,
+                                                   appVersion: AppInfo.version) { request in
+                let (data, response) = try await URLSession.shared.data(for: request)
+                return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+            }
+            switch answer {
+            case .newer(let version, let page):
+                self.availableUpdate = (version, page)
+                if let notice = UpdateChecker.noticeVersion(for: answer,
+                                                            lastNotified: UserDefaults.standard
+                                                                .string(forKey: Self.updateNotifiedKey)) {
+                    UserDefaults.standard.set(notice, forKey: Self.updateNotifiedKey)
+                    self.overlayWarn("Version \(notice) is out. Open the \(AppInfo.displayName) menu.",
+                                     autoHideAfter: 5)
+                }
+                self.rebuildMenu()
+            case .current:
+                if self.availableUpdate != nil {
+                    self.availableUpdate = nil
+                    self.rebuildMenu()
+                }
+            case .malformed:
+                NSLog("QuickScribe: update check got an answer it could not read")
+            case .failed:
+                NSLog("QuickScribe: update check did not reach GitHub")
+            }
+        }
+    }
+
+    @objc private func openReleasePage() {
+        if let page = availableUpdate?.page { NSWorkspace.shared.open(page) }
     }
 
     /// True only when the global event tap is live (hotkeys actually work).
@@ -222,6 +277,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewrite.representedObject = RefineMode.rewriteProfile
         rewrite.state = session.defaultProfile == RefineMode.rewriteProfile ? .on : .off
         menu.addItem(rewrite)
+
+        if let update = availableUpdate {
+            // Only when a check actually said newer; opens GitHub's own page
+            // for that release, where the person can read what changed.
+            let item = NSMenuItem(title: "Update available: version \(update.version)",
+                                  action: #selector(openReleasePage), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
 
         menu.addItem(.separator())
 
