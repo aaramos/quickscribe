@@ -52,7 +52,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>   <string>27.0</string>
     <key>LSUIElement</key>              <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>${APP_NAME} listens while you hold the hotkey and turns your voice into text on this Mac.</string>
+    <string>${APP_NAME} listens while you hold the hotkey. Your voice is turned into text on this Mac, or at the address you set in Settings if you switch speech to a custom service.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>${APP_NAME} uses Apple's on-device speech recognition to turn your voice into text.</string>
     <key>NSAppleEventsUsageDescription</key>
