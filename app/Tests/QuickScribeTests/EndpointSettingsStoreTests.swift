@@ -30,8 +30,9 @@ final class EndpointSettingsStoreTests: XCTestCase {
     func testRoundTripOfAddressModelsAndChoices() throws {
         let store = EndpointSettingsStore(defaults: defaults, secrets: MemorySecrets.Store())
         var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "whisper-large",
-                                 cleanupModel: "qwen-tidy", language: "en",
+                                 cleanupModel: "qwen-tidy",
                                  useCustomSpeech: true, useCustomCleanup: false)
+        s.language = EndpointSettings.deviceLanguage   // follows the Mac, never stored
         store.save(s)
         let loaded = store.load()
         XCTAssertEqual(loaded, s)
@@ -47,6 +48,16 @@ final class EndpointSettingsStoreTests: XCTestCase {
         store.save(EndpointSettings(address: "", useCustomSpeech: true, useCustomCleanup: true))
         XCTAssertFalse(store.load().speechUsesEndpoint)
         XCTAssertFalse(store.load().cleanupUsesEndpoint)
+    }
+
+    func testLanguageFollowsTheMacAndIsNeverPinned() {
+        XCTAssertEqual(EndpointSettings().language, EndpointSettings.deviceLanguage)
+        let store = EndpointSettingsStore(defaults: defaults, secrets: MemorySecrets.Store())
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1")
+        s.language = "zz"            // even if something sets another language and saves,
+        store.save(s)
+        XCTAssertEqual(store.load().language, EndpointSettings.deviceLanguage,
+                       "a stored language would go stale when the Mac's language changes")
     }
 
     func testAPIKeyLivesOnlyInTheSecretStore() throws {

@@ -17,7 +17,7 @@ public enum MemorySecrets {
         public func secret() -> String? { lock.lock(); defer { lock.unlock() }; return value }
         public func setSecret(_ value: String?) throws {
             lock.lock(); defer { lock.unlock() }
-            self.value = (value?.isEmpty ?? true) ? nil : value   // clearing is the same as the Keychain store
+            self.value = KeychainSecrets.usable(value)   // blank means cleared, same as the Keychain store
         }
     }
 }
@@ -33,6 +33,13 @@ public final class KeychainSecrets: SecretStoring {
          kSecAttrAccount as String: "api-key"]
     }
 
+    /// An empty or blank value means "no key": it clears the entry instead of
+    /// storing nothing, so a pasted-then-deleted key leaves no stray item.
+    static func usable(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty ?? true) ? nil : trimmed
+    }
+
     public func secret() -> String? {
         var item: CFTypeRef?
         var q = query
@@ -44,29 +51,23 @@ public final class KeychainSecrets: SecretStoring {
     }
 
     public func setSecret(_ value: String?) throws {
-        let status = value.flatMap({ $0.isEmpty ? nil : $0 })
-            .map { data in
-                var add = query
-                add[kSecValueData as String] = Data(data.utf8)
-                let made = SecItemAdd(add as CFDictionary, nil)
-                if made == errSecSuccess || made == errSecDuplicateItem { return made }
-                return made
-            }
-        if value?.isEmpty ?? true {
+        guard let key = Self.usable(value) else {
             let removed = SecItemDelete(query as CFDictionary)
             if removed != errSecSuccess && removed != errSecItemNotFound {
                 throw endpointError("Could not clear the saved key (keychain status \(removed)).")
             }
             return
         }
-        guard let status else { return }
-        if status == errSecDuplicateItem {
-            let updated = SecItemUpdate(query as CFDictionary,
-                                        [kSecValueData as String: Data((value ?? "").utf8)] as CFDictionary)
-            if updated != errSecSuccess { throw endpointError("Could not save the key (keychain status \(updated)).") }
-        } else if status != errSecSuccess {
-            throw endpointError("Could not save the key (keychain status \(status)).")
+        var add = query
+        add[kSecValueData as String] = Data(key.utf8)
+        let made = SecItemAdd(add as CFDictionary, nil)
+        if made == errSecSuccess { return }
+        guard made == errSecDuplicateItem else {
+            throw endpointError("Could not save the key (keychain status \(made)).")
         }
+        let updated = SecItemUpdate(query as CFDictionary,
+                                    [kSecValueData as String: Data(key.utf8)] as CFDictionary)
+        if updated != errSecSuccess { throw endpointError("Could not save the key (keychain status \(updated)).") }
     }
 }
 
@@ -86,12 +87,18 @@ public struct EndpointSettings: Equatable, Sendable {
     public var useCustomSpeech: Bool
     public var useCustomCleanup: Bool
 
-    public init(address: String = "", speechModel: String = "", cleanupModel: String = "", language: String = "en",
+    /// Apple's speech follows the Mac's language, so custom speech defaults to
+    /// the same. A language explicitly typed or saved wins over the default.
+    public static var deviceLanguage: String {
+        Locale.current.language.languageCode?.identifier ?? "en"
+    }
+
+    public init(address: String = "", speechModel: String = "", cleanupModel: String = "", language: String? = nil,
                 useCustomSpeech: Bool = false, useCustomCleanup: Bool = false) {
         self.address = address
         self.speechModel = speechModel
         self.cleanupModel = cleanupModel
-        self.language = language
+        self.language = language ?? Self.deviceLanguage
         self.useCustomSpeech = useCustomSpeech
         self.useCustomCleanup = useCustomCleanup
     }
@@ -121,23 +128,38 @@ public struct EndpointSettings: Equatable, Sendable {
     public var hostName: String { apiBase?.host ?? "" }
 
     /// Loopback, `.local`, and private LAN ranges count as local.
+    /// True for loopback and private network numbers, and only for them. Host
+    /// names are never local: "127.evil.com" points wherever its owner says,
+    /// so a name that merely begins with a private number gets no free pass.
     public static func isLocal(host: String) -> Bool {
-        let h = host.lowercased()
+        let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))   // URL.host wraps IPv6 in brackets
         if h == "localhost" || h.hasSuffix(".local") { return true }
-        if h == "::1" { return true }
-        let parts = h.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4 else { return h.hasPrefix("127.") }
-        switch (parts[0], parts[1]) {
-        case (127, _): return true
-        case (10, _): return true
-        case (172, let b) where (16...31).contains(b): return true
+        if h == "::1" || h.hasPrefix("fe80:") { return true }   // loopback and link-local IPv6
+        guard let octets = ipv4Octets(h) else { return false }
+        switch (octets[0], octets[1]) {
+        case (127, _), (10, _): return true
+        case (172, let b): return (16...31).contains(b)
         case (192, 168): return true
         case (169, 254): return true
         default: return false
         }
     }
 
-    public var usesPlainHTTP: Bool { normalizedAddress.hasPrefix("http://") }
+    /// Exactly four decimal numbers from 0 to 255, nothing else. Leading
+    /// zeros, blanks, "-1", "256" and names all fail.
+    static func ipv4Octets(_ text: String) -> [Int]? {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+        var octets: [Int] = []
+        for part in parts {
+            guard !part.isEmpty, part.count <= 3, part.allSatisfy(\.isNumber),
+                  part.utf8.first != 0x30 || part.count == 1,   // no leading zeros
+                  let value = Int(part), (0...255).contains(value)
+            else { return nil }
+            octets.append(value)
+        }
+        return octets
+    }
 
     /// nil when the address is fine (or absent). Otherwise a plain sentence
     /// explaining what to fix. Non-local plain http is refused because words
@@ -162,7 +184,6 @@ public final class EndpointSettingsStore: @unchecked Sendable {
     private let addressKey = "endpoint.address"
     private let speechKey = "endpoint.speechModel"
     private let cleanupKey = "endpoint.cleanupModel"
-    private let languageKey = "endpoint.language"
     private let speechCustomKey = "endpoint.useCustomSpeech"
     private let cleanupCustomKey = "endpoint.useCustomCleanup"
 
@@ -175,7 +196,8 @@ public final class EndpointSettingsStore: @unchecked Sendable {
         EndpointSettings(address: defaults.string(forKey: addressKey) ?? "",
                          speechModel: defaults.string(forKey: speechKey) ?? "",
                          cleanupModel: defaults.string(forKey: cleanupKey) ?? "",
-                         language: defaults.string(forKey: languageKey) ?? "en",
+                         // Language is not persisted: there is no setting for it, and a stored
+                         // one would go stale when the Mac's language changes.
                          useCustomSpeech: defaults.bool(forKey: speechCustomKey),
                          useCustomCleanup: defaults.bool(forKey: cleanupCustomKey))
     }
@@ -184,7 +206,6 @@ public final class EndpointSettingsStore: @unchecked Sendable {
         defaults.set(settings.address, forKey: addressKey)
         defaults.set(settings.speechModel, forKey: speechKey)
         defaults.set(settings.cleanupModel, forKey: cleanupKey)
-        defaults.set(settings.language, forKey: languageKey)
         defaults.set(settings.useCustomSpeech, forKey: speechCustomKey)
         defaults.set(settings.useCustomCleanup, forKey: cleanupCustomKey)
         defaults.synchronize()

@@ -188,7 +188,8 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertTrue(body.contains("name=\"file\"; filename=\"audio.wav\""), body)
         XCTAssertTrue(body.contains("Content-Type: audio/wav"), body)
         XCTAssertTrue(body.contains("name=\"model\"\r\n\r\nspeechy"), body)
-        XCTAssertTrue(body.contains("name=\"language\"\r\n\r\nen"), body)
+        XCTAssertTrue(body.contains("name=\"language\"\r\n\r\n\(settings.language)"), body)
+        XCTAssertFalse(settings.language.isEmpty, "custom speech follows the Mac's language, it is never blank")
         XCTAssertTrue(req.body.range(of: wav) != nil, "the clip itself must be in the body")
         XCTAssertEqual(req.headers["authorization"], "Bearer test-key-local")
     }
@@ -237,6 +238,26 @@ final class OpenAICompatClientTests: XCTestCase {
     func testLocalPlainHTTPIsAllowed() {
         for a in ["http://127.0.0.1:1234/v1", "http://localhost:1234", "http://192.168.1.20:1234/v1", "http://my-mac.local:1234/v1"] {
             XCTAssertNil(EndpointSettings(address: a).addressProblem, a)
+        }
+    }
+
+    /// Names that only look like private numbers are not local. Trusted
+    /// prefixes there would let a public host skip both the refusal and the
+    /// words-leave-the-Mac warning.
+    func testFakePrivateNumbersAreNotLocal() {
+        for host in ["127.evil.com", "10.0.0.1.evil.com", "192.168.1.1.attacker.net", "127.1", "127.0.0.1.example.org"] {
+            XCTAssertFalse(EndpointSettings.isLocal(host: host), host)
+            var s = EndpointSettings(address: "http://\(host):1234/v1")
+            XCTAssertNotNil(s.addressProblem, "plain http to \(host) must be refused")
+        }
+    }
+
+    func testOnlyRealPrivateNumbersAreLocal() {
+        for host in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.86.48", "169.254.1.2", "localhost", "server.local", "::1"] {
+            XCTAssertTrue(EndpointSettings.isLocal(host: host), host)
+        }
+        for host in ["172.15.0.1", "172.32.0.1", "8.8.8.8", "1.1.1.1", "256.1.1.1", "10.0.0", "10.0.0.1.2", "10.0.0.-1", "010.0.0.1", "10.0.0.999", "evil.com"] {
+            XCTAssertFalse(EndpointSettings.isLocal(host: host), host)
         }
     }
 
