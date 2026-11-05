@@ -28,9 +28,13 @@ public enum CleanupGuard {
         }
     }
 
-    public static func accepts(output: String, input: String, mode: String) -> Bool {
-        guard digitsComeFromInput(output: output, input: input) else { return false }
-        guard !inventsCurrency(output: output, input: input) else { return false }
+    public static func accepts(output rawOutput: String, input rawInput: String, mode: String) -> Bool {
+        guard digitsComeFromInput(output: rawOutput, input: rawInput) else { return false }
+        guard !inventsCurrency(output: rawOutput, input: rawInput) else { return false }
+        guard !inventsTimeOfDay(output: rawOutput, input: rawInput) else { return false }
+        // Dots in am/pm must not read as brand-new words when the model restyled
+        // "three pm" as "3 p.m."; both sides fold to the same tokens first.
+        let output = foldTimeDots(rawOutput), input = foldTimeDots(rawInput)
         // A question that came back as a statement has been answered.
         if input.contains("?"), !output.contains("?") { return false }
         guard let limits = limits(mode) else { return true }
@@ -60,6 +64,38 @@ public enum CleanupGuard {
 
     private static func isNotNumber(_ word: String) -> Bool {
         units[word] == nil && scales[word] == nil && !word.allSatisfy(\.isNumber)
+    }
+
+    private static func foldTimeDots(_ text: String) -> String {
+        var folded = text
+        for (dotted, plain) in [("a.m.", "am"), ("p.m.", "pm")] {
+            folded = folded.replacingOccurrences(of: dotted, with: plain, options: .caseInsensitive)
+            folded = folded.replacingOccurrences(of: dotted.replacingOccurrences(of: ".", with: ". "),
+                                                 with: plain, options: .caseInsensitive)
+        }
+        return folded
+    }
+
+    /// A marker the speaker said: dotted a.m./p.m. anywhere, a bare pm, or
+    /// am/pm pressed against a digit. "I am" matches none of these, because
+    /// a verb am never wears a dot or sits tight behind a number.
+    private static let spokenTimeMarker = try! NSRegularExpression(
+        pattern: #"[ap]\.\s?m\.?|\bpm\b|[0-9]\s*[ap]\.?\s?[m]"#, options: [.caseInsensitive])
+
+    /// A time of day written onto a number: 3pm, 3 p.m., 3:00 PM, and the
+    /// dotted form after a spelled-out hour ("three p.m.").
+    private static let writtenTimeSuffix = try! NSRegularExpression(
+        pattern: #"\d{1,2}(:\d{2})?\s*[ap]\.?\s?m\b|[ap]\.\s?m\b"#, options: [.caseInsensitive])
+
+    /// A model that has seen "three on Friday" loves to hand back "3 p.m.",
+    /// and the reader cannot tell the invented half from the real one. An
+    /// answer may write a.m./p.m. only where the speaker said one; "tonight"
+    /// and "in the morning" are not saying it.
+    static func inventsTimeOfDay(output: String, input: String) -> Bool {
+        let range = NSRange(output.startIndex..., in: output)
+        guard writtenTimeSuffix.firstMatch(in: output, range: range) != nil else { return false }
+        let given = NSRange(input.startIndex..., in: input)
+        return spokenTimeMarker.firstMatch(in: input, range: given) == nil
     }
 
     private static let currencySymbols = CharacterSet(charactersIn: "$€£¥₹")

@@ -137,6 +137,36 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertFalse(CleanupGuard.accepts(output: "The rent is $950 a month.",
                                             input: "the rent is 950 a month", mode: "rewrite"))
     }
+    func testGuardRefusesATimeOfDayTheSpeakerNeverSaid() {
+        let Friday = "let's meet at three on friday"
+        for invented in ["Let's meet at 3pm on Friday.", "Let's meet at 3 p.m. on Friday.",
+                         "Let's meet at 3:00 PM on Friday.", "Let's meet at 3 PM Friday",
+                         "Let's meet at three p.m. on Friday."] {
+            XCTAssertFalse(CleanupGuard.accepts(output: invented, input: Friday, mode: "polish"),
+                           "\(invented) adds a time of day from nowhere")
+        }
+        XCTAssertFalse(CleanupGuard.accepts(output: "The pharmacy closes at 9 p.m. tonight.",
+                                            input: "the pharmacy closes at nine tonight", mode: "concise"),
+                       "tonight is not saying p.m.")
+        // Said means said: words, digits, dots all count.
+        XCTAssertTrue(CleanupGuard.accepts(output: "Let's meet at 3 p.m. on Friday.",
+                                           input: "let's meet at 3 p.m. on friday", mode: "polish"))
+        XCTAssertTrue(CleanupGuard.accepts(output: "Let's meet at 3 p.m. on Friday.",
+                                           input: "let's meet at three pm friday", mode: "polish"))
+        XCTAssertTrue(CleanupGuard.accepts(output: "Let's meet at 3 on Friday.",
+                                           input: "let's meet at three on friday", mode: "polish"),
+                      "keeping the speaker's clock-free words passes")
+        // The verb in "I am" is not a time marker in either direction.
+        XCTAssertTrue(CleanupGuard.accepts(output: "I am meeting Dana at 3 on Friday.",
+                                           input: "i am meeting dana at three on friday", mode: "polish"),
+                      "I am must never read as a.m.")
+        XCTAssertFalse(CleanupGuard.accepts(output: "I am 3pm on the dot.",
+                                            input: "i am on the dot at three", mode: "polish"))
+        // Rewrite's looser limits still refuse it.
+        XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 p.m. Friday.",
+                                            input: Friday, mode: "rewrite"))
+    }
+
 
 }
 
