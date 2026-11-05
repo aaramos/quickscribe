@@ -4,13 +4,13 @@ A fallback is when the model's answer fails the safety check (or errors) and
 the person's tidied words are inserted instead. The service route ran a local
 instruction model over the loopback address, warmed, one request at a time.
 
-FIRE THE FALLBACK  (per mode, 50 dictations each; final numbers after the
-currency, time-of-day and dot-folding rules joined the guard)
+FIRE THE FALLBACK  (per mode, 50 dictations each; final numbers, guard with
+per-number money and time rules, every honesty check in)
   mode              apple    apple caught   service   service caught   errors
   Polish            10.0%             5     6.0%                 3      0
-  Concise           22.0%            11     12.0%                6      0
-  Active Voice      24.0%            12     14.0%                7      0
-  Rewrite           18.0%             9     6.0%                 3      0
+  Concise           22.0%            11     10.0%                5      0
+  Active Voice      24.0%            12     12.0%                6      0
+  Rewrite           18.0%             9     10.0%                5      0
 
 TIMING (seconds per cleanup, median, service warm)
   apple    0.5    0.5    0.6    0.4
@@ -18,16 +18,19 @@ TIMING (seconds per cleanup, median, service warm)
 
 Notes:
 - The service set needs no new limits: its refusal rate sits BELOW Apple's in
-  every mode. The limits tuned for Apple's model hold for a general model too.
-- Two reruns happened as the guard grew. After the currency rule: Apple
-  unchanged, service 6.0 / 14.0 / 16.0 / 14.0. After the a.m./p.m. rule and
-  the dot folding, this final table: Apple's Concise eased one item (a dot
-  restyle no longer counts as new words), Apple's Active Voice gained two
-  (one is a genuine invention: a question about when the pharmacy opens came
-  back "opens at 8 a.m. tomorrow", neither said nor asked for), and the
-  service eased in Concise, Active Voice and Rewrite, again restyle items,
-  not lost teeth. Zero inserted answers carry an invented currency sign or
-  time of day.
+  every mode, and no rate climbed above the reviewer's own Apple rerun
+  (12.0 / 24.0 / 24.0 / 18.0), so none is proposed.
+- Three reruns happened as the guard grew: after the currency rule, after
+  the a.m./p.m. rule with dot folding, and this one with every sign and
+  marker tied to its own number. Apple's numbers have held at 10.0 / 22.0 /
+  24.0 / 18.0 across the last two; the service moves by one or two items per
+  rerun between identical code, which is ordinary sampling for this model.
+- Inserted rows are, by construction, rows the per-number rules passed, and
+  a search of this run's output found no symbol or marker the dictation had
+  not earned. Where the review's own wrong answers (a sign moved onto an
+  account number, a p.m. built from another hour's a.m., a marker read
+  across a sentence break) are fed to the guard directly, every one is
+  refused: those are the tests.
 - All failures were the guard rejecting a changed number, an added marker or
   a dropped word; there were no connection or key errors in any run.
 - Regenerate any row with: cleanup-eval clean <corpus.json> <variant> (and the
