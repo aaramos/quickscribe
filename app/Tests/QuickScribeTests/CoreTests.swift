@@ -156,12 +156,26 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertTrue(CleanupGuard.accepts(output: "Let's meet at 3 on Friday.",
                                            input: "let's meet at three on friday", mode: "polish"),
                       "keeping the speaker's clock-free words passes")
-        // The verb in "I am" is not a time marker in either direction.
+        // The verb is not a marker, and never wears one: "I am" is not a.m.,
+        // and an am glued to the hour ("3 am I right") is still a verb.
         XCTAssertTrue(CleanupGuard.accepts(output: "I am meeting Dana at 3 on Friday.",
                                            input: "i am meeting dana at three on friday", mode: "polish"),
                       "I am must never read as a.m.")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Let's start at 3 am I right.",
+                                           input: "let's start at three am i right", mode: "polish"),
+                      "3 am I: the am is the verb, the guard must stay shut")
         XCTAssertFalse(CleanupGuard.accepts(output: "I am 3pm on the dot.",
-                                            input: "i am on the dot at three", mode: "polish"))
+                                            input: "i am on the dot at three", mode: "polish"),
+                       "a real invented 3pm is stamped even beside a verb am")
+        // A clock reading spoken in words: spaced p m marks and o'clock.
+        XCTAssertTrue(CleanupGuard.accepts(output: "The 4 p.m. report is late for the 4 pm report from four pm.",
+                                           input: "the four o'clock report is late for the four p m report from four p m",
+                                           mode: "rewrite"),
+                      "the spoken p m makes the word four a clock reading")
+        XCTAssertTrue(CleanupGuard.accepts(output: "The 4 o'clock report is late for the 4 pm report.",
+                                           input: "the four o'clock report is late for the four pm report",
+                                           mode: "rewrite"),
+                      "rewrite keeps a spoken three o'clock as a digit")
         // Rewrite's looser limits still refuse it.
         XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 p.m. Friday.",
                                             input: Friday, mode: "rewrite"))

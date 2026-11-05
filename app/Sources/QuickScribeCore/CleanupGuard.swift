@@ -76,16 +76,20 @@ public enum CleanupGuard {
         return folded
     }
 
-    /// A marker the speaker said: dotted a.m./p.m. anywhere, a bare pm, or
-    /// am/pm pressed against a digit. "I am" matches none of these, because
-    /// a verb am never wears a dot or sits tight behind a number.
+    /// Marker shapes, on both sides: dotted or spaced "a. m."/"p m", a bare
+    /// pm, or one pressed against a digit. The verb in "I am" matches none of
+    /// them, and "3 am I right" is a question glued to the hour, not a.m.:
+    /// a.m. never stands before "I".
     private static let spokenTimeMarker = try! NSRegularExpression(
-        pattern: #"[ap]\.\s?m\.?|\bpm\b|[0-9]\s*[ap]\.?\s?[m]"#, options: [.caseInsensitive])
+        pattern: #"\b[ap][.\s]+m\b|\bpm\b|[0-9]\s*a\s*m\b(?!\s+[Ii]\b)|[0-9]\s*p\s*m\b"#,
+        options: [.caseInsensitive])
 
-    /// A time of day written onto a number: 3pm, 3 p.m., 3:00 PM, and the
-    /// dotted form after a spelled-out hour ("three p.m.").
+    /// A time of day written onto the answer: the same shapes, plus the hour
+    /// word worn onto am ("three am"), which speech writes without a digit.
+    /// The verb after "I" ("3 am I right", "I am") is never a shape.
     private static let writtenTimeSuffix = try! NSRegularExpression(
-        pattern: #"\d{1,2}(:\d{2})?\s*[ap]\.?\s?m\b|[ap]\.\s?m\b"#, options: [.caseInsensitive])
+        pattern: #"\b[ap][.\s]+m\.?\b|\bpm\b|[0-9]\s*p\s*m\b|\b(?:[a-hj-z]+|[0-9]+)\s*a\s*m\b(?!\s+[Ii]\b)"#,
+        options: [.caseInsensitive])
 
     /// A model that has seen "three on Friday" loves to hand back "3 p.m.",
     /// and the reader cannot tell the invented half from the real one. An
