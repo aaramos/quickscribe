@@ -186,10 +186,11 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
             wordsOutLabel.stringValue = problem
             wordsOutLabel.textColor = .systemRed
             wordsOutLabel.isHidden = false
-        } else if s.isEnabled, !EndpointSettings.isLocal(host: s.hostName) {
-            wordsOutLabel.stringValue = "Your words will leave this Mac and travel to \(s.hostName). "
-                + (s.usesPlainHTTP ? "They would travel unencrypted, so use an https or local address." : "")
-            wordsOutLabel.textColor = s.usesPlainHTTP ? .systemRed : .secondaryLabelColor
+        } else if s.speechUsesEndpoint || s.cleanupUsesEndpoint, !EndpointSettings.isLocal(host: s.hostName) {
+            // Only a route actually set to Custom moves words. Plain http to
+            // a remote address never reaches here: the check above refuses it.
+            wordsOutLabel.stringValue = "Your words will leave this Mac and travel to \(s.hostName)."
+            wordsOutLabel.textColor = .secondaryLabelColor
             wordsOutLabel.isHidden = false
         } else {
             wordsOutLabel.isHidden = true
@@ -239,7 +240,9 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         connectionTestButton.isEnabled = false
         connectionStatus.stringValue = "Testing…"
         let s = collectConnection()
-        let key = keyField.stringValue
+        // A pasted key often carries spaces or line breaks; the service wants
+        // exactly what it handed out.
+        let key = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         connectionChanged(saveKey: true)
         Task { [weak self] in
             let report = await Self.runConnectionTest(settings: s, apiKey: key)
@@ -258,7 +261,9 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         guard settings.isEnabled else {
             return "No address set, so everything runs on Apple's own models on this Mac."
         }
-        let client = OpenAICompatClient(settings: settings, apiKey: apiKey, timeout: 20)
+        // A server may load the model on its first call; the original app
+        // allowed 120 s for that, so this must not read a slow load as failure.
+        let client = OpenAICompatClient(settings: settings, apiKey: apiKey, timeout: 120)
         var reached = false, keyOK = false
         switch await client.checkModels() {
         case .success(let models):
@@ -314,7 +319,7 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
 
     /// A short silence as 16 kHz mono 16-bit PCM in a WAV container. Test
     /// Connection uses it instead of recorded words.
-    static func silenceWAV(seconds: Double = 0.3, sampleRate: Int = 16_000) -> Data {
+    nonisolated static func silenceWAV(seconds: Double = 0.3, sampleRate: Int = 16_000) -> Data {
         let samples = Int(seconds * Double(sampleRate))
         let pcmLength = samples * 2
         var data = Data()
@@ -469,7 +474,9 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         }
 
         let buttons = NSStackView(views: [status, NSView(), resetButton, saveButton])
-        let stack = NSStackView(views: [
+        // Top-aligned inside the window's scroller: the report can grow and
+        // the window still fits a small screen.
+        let stack = FlippedStackView(views: [
             serviceStack,
             heading("Refine Prompts"),
             modePicker,
@@ -488,13 +495,41 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true
         }
 
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = stack
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor).isActive = true
+        stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor).isActive = true
+        stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        // The page is never shorter than the viewport and never clipped:
+        // these two let the scroller derive the content size from the layout.
+        stack.bottomAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.bottomAnchor).isActive = true
+        let fill = stack.bottomAnchor.constraint(equalTo: scroll.contentView.bottomAnchor)
+        fill.priority = .defaultLow
+        fill.isActive = true
+
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 800),
                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
         win.title = "\(AppInfo.displayName) Settings"
         win.isReleasedWhenClosed = false
-        win.contentView = stack
+        win.contentView = scroll
+        // Fit a 13-inch MacBook Air at its default 1440x900 (visible height
+        // about 800 points) even when the Test Connection report is full: the
+        // window stays put and the page scrolls inside it.
+        win.layoutIfNeeded()
+        let needed = stack.fittingSize.height
+        let screenCap = (win.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+        win.setContentSize(NSSize(width: 640, height: min(max(needed, 360), min(680, screenCap - 60))))
         win.center()
         return win
+    }
+
+    /// Draws its row list from the top, the way a page does.
+    private final class FlippedStackView: NSStackView {
+        override var isFlipped: Bool { true }
     }
 
     private func noteLabel(_ text: String) -> NSTextField {

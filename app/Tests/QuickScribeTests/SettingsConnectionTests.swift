@@ -73,6 +73,18 @@ final class SettingsConnectionTests: XCTestCase {
                        "the API key must never reach the preference files")
     }
 
+    /// Keys pasted from a chat window carry spaces and line breaks; the
+    /// service wants exactly what it handed out.
+    func testPastedKeyIsTrimmedBeforeSaving() throws {
+        keyField.stringValue = "\n  sk-pasted-key  \t\n"
+        commit(keyField)
+        XCTAssertEqual(secrets.secret(), "sk-pasted-key")
+        // Blank after a space-only paste means cleared, not stored.
+        keyField.stringValue = "   \n "
+        commit(keyField)
+        XCTAssertNil(secrets.secret())
+    }
+
     func testTypedModelSurvivesTheModelListArriving() async throws {
         addressField.stringValue = service.baseURL
         commit(addressField)
@@ -84,11 +96,22 @@ final class SettingsConnectionTests: XCTestCase {
     }
 
     func testNonLocalAddressShowsTheLeavingWarning() throws {
+        popups[0].selectItem(at: 1)          // Speech set to Custom: words really do leave
+        commit(popups[0])
         addressField.stringValue = "https://some-service.example"
         commit(addressField)
         let warning = all(NSTextField.self, in: root).first { $0.stringValue.contains("leave this Mac") }
         XCTAssertNotNil(warning, "a non-local address must say on screen that words leave the Mac")
         XCTAssertTrue(warning!.stringValue.contains("some-service.example"))
+        XCTAssertFalse(warning!.stringValue.contains("unencrypted"), "https does not add a false warning")
+    }
+
+    /// A set address with both routes still on Apple moves nothing.
+    func testWarningHiddenWhileBothRoutesStayOnApple() throws {
+        addressField.stringValue = "https://some-service.example"
+        commit(addressField)
+        XCTAssertFalse(all(NSTextField.self, in: root).contains { $0.stringValue.contains("leave this Mac") },
+                       "nothing leaves the Mac when neither route is set to Custom")
     }
 
     func testNonLocalPlainHTTPRefusedOnScreen() throws {
@@ -130,8 +153,9 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertFalse(report.contains("wrong"), "the key value itself never appears in reports")
     }
 
-    /// Layout check: every Custom service control sits inside the window with
-    /// room to read, controls do not overlap, and labels are drawn on screen.
+    /// Layout check: the settings page lives in a scroller, so controls are
+    /// judged against the document, must not overlap, and a full Test
+    /// Connection report must never push the window past a small screen.
     /// Set QS_SETTINGS_SHOTS to a folder to save a picture.
     func testWindowIsLaidOutCorrectly() throws {
         addressField.stringValue = service.baseURL
@@ -140,31 +164,49 @@ final class SettingsConnectionTests: XCTestCase {
         commit(keyField)
         speechChoice_selectCustom()
         let win = try! XCTUnwrap(settings.window)
-        let content = win.contentView!
-        let rootFrame = content.bounds
+        // The page scrolls: window content is a scroller, controls live in its document.
+        let scroller = try XCTUnwrap(win.contentView as? NSScrollView)
+        let doc = try XCTUnwrap(scroller.documentView)
         let controls: [NSView] = ([addressField, keyField] as [NSTextField]) + combos + popups + [testButton]
         for control in controls {
-            let frame = control.convert(control.bounds, to: content)
-            XCTAssertTrue(rootFrame.contains(frame), "\(type(of: control)) outside the window: \(frame) in \(rootFrame)")
+            let frame = control.convert(control.bounds, to: doc)
+            XCTAssertTrue(doc.bounds.contains(frame), "\(type(of: control)) outside the page: \(frame) in \(doc.bounds)")
             XCTAssertGreaterThan(frame.width, 40, "control too narrow: \(frame)")
             XCTAssertGreaterThan(frame.height, 16, "control too short: \(frame)")
         }
         // Neighbours must not sit on top of each other.
         for (i, a) in controls.enumerated() {
             for b in controls.dropFirst(i + 1) {
-                let fa = a.convert(a.bounds, to: content), fb = b.convert(b.bounds, to: content)
+                let fa = a.convert(a.bounds, to: doc), fb = b.convert(b.bounds, to: doc)
                 XCTAssertFalse(fa.intersects(fb), "\(type(of: a)) overlaps \(type(of: b)): \(fa) vs \(fb)")
             }
         }
-        // The section headings and notes are visible somewhere in the window.
-        let visible = all(NSTextField.self, in: content).filter { !$0.isHidden }
+        // The section headings and notes are drawn on the page.
+        let visible = all(NSTextField.self, in: doc).filter { !$0.isHidden }
         XCTAssertTrue(visible.contains { $0.stringValue == "Custom service" }, "heading missing")
         XCTAssertTrue(visible.contains { $0.stringValue.contains("Apple's on-device models") }, "default explanation missing")
-        XCTAssertGreaterThan(rootFrame.height, 700, "window too short for the new section")
+
+        // A full four-line report must not grow the window past a small screen:
+        // 1440x900 leaves about 800 visible points. Height stays fixed, the page scrolls.
+        let report = all(NSTextField.self, in: doc).first { !$0.isEditable && ($0.font?.fontName.contains("Mono") ?? false) }
+        let status = try XCTUnwrap(report, "Test Connection report label not found")
+        status.stringValue = """
+        Reached the address. It has 18 models.
+        Key accepted.
+        Speech works (whisper).
+        Cleanup works (tidy).
+        Your words will leave this Mac and travel to host.example.
+        """
+        win.layoutIfNeeded()
+        XCTAssertLessThanOrEqual(win.frame.height, 760, "window too tall for a 1440x900 screen with a full report")
+        let reportFrame = status.convert(status.bounds, to: doc)
+        XCTAssertTrue(doc.bounds.contains(reportFrame), "report must be on the page, reachable by scrolling")
+        XCTAssertGreaterThan(status.frame.height, 40, "the report label must show all its lines")
+
         if let folder = ProcessInfo.processInfo.environment["QS_SETTINGS_SHOTS"] {
-            // A photo needs the real key field, but a secure field draws dots anyway.
-            guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
-            content.cacheDisplay(in: content.bounds, to: rep)
+            // A photo of the whole page, not just the visible part.
+            guard let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) else { return }
+            doc.cacheDisplay(in: doc.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/settings.png"))
         }
     }
