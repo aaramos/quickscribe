@@ -1,8 +1,9 @@
 # QuickScribe
 
-Hold a hotkey, talk, let go, and clean text appears wherever you're typing. It runs
-entirely on Apple's own technology, on your Mac. There's no engine to install, no
-Python, no third-party code and no AI model to download with the app.
+Hold a hotkey, talk, let go, and clean text appears wherever you're typing. By default
+it runs entirely on Apple's own technology, on your Mac. There's no engine to install, no
+Python, no third-party code and no AI model to download with the app. Optionally, any
+route can point at your own OpenAI-compatible service instead (see below).
 
 ## What it needs
 
@@ -10,14 +11,17 @@ Python, no third-party code and no AI model to download with the app.
 - Apple Intelligence turned on, for AI cleanup. Without it, dictation still works, with
   only the basic tidy-up.
 - Microphone and Accessibility permission. Accessibility is what lets the hotkey work
-  anywhere and lets the text paste in.
+  anywhere and lets the text paste in. On macOS 27, Accessibility lives under
+  **System Settings > Device Control and Data Access**.
 
 ## Install
 
 1. Open `QuickScribe.dmg` and drag the app to Applications.
-2. Open it from Applications. macOS will block it the first time, because it isn't signed
-   with a paid Apple Developer ID. Go to System Settings > Privacy & Security, scroll down
-   and click Open Anyway.
+2. Open it from Applications. macOS will block it the first time, because this free,
+   open-source app isn't signed with a paid Apple Developer ID: macOS can't check who made
+   it, so it asks you. System Settings offers **Open Anyway** next to the message about
+   QuickScribe; if you don't see it where you are, search "Open Anyway" in System
+   Settings. This is a one-time step.
 3. Grant Microphone and Accessibility when asked, then quit and reopen the app.
 4. Look for the icon in the menu bar. There's no window.
 
@@ -31,6 +35,14 @@ To build the installer yourself, run `app/make_installer.sh`.
 - Hold **⌃⌘⇧** to Rewrite one dictation.
 - Edit each mode's instructions in **Settings…**, and try them on sample text there.
 
+## Updating
+
+The menu bar icon tells you when a newer version is out, and the menu links to the
+release page. The app never downloads or installs anything itself: you drag the new
+disk image to Applications when you choose. After an update macOS may ask for
+Microphone and Accessibility again; switch them back on if the hotkeys go quiet. Your
+settings and edited prompts survive the update.
+
 ## Your own service (optional)
 
 By default everything runs on Apple's on-device models and no words leave the Mac.
@@ -42,6 +54,10 @@ things it needs to work. With no address set, Apple's models are used.
 If the address is not on this Mac or your local network, your words and your key travel
 to it, and they are only encrypted if the address uses https; plain http to a remote
 address is refused. A non-local address also shows a warning on screen.
+
+What always leaves the Mac, even with no address set: one plain HTTPS question a day to
+GitHub's release API ("is there a newer version?"), carrying nothing but the app name
+and version. No words, no audio, no identifiers.
 
 Don't run it alongside the original QuickScribe. Both use the same hotkey, so this one
 refuses to record and says why.

@@ -15,13 +15,34 @@ ln -s /Applications "$STAGE/Applications"
 cat > "$STAGE/Read Me.txt" <<README
 Installing ${APP_NAME}
 
-1. Drag ${APP_NAME} to Applications.
-2. Open it from Applications. macOS will block it the first time. Go to System Settings >
-   Privacy & Security, scroll down and click Open Anyway.
-3. Grant Microphone and Accessibility when asked, then quit and reopen the app.
-4. Look for the icon in the menu bar. There's no window.
+What it needs, before you start:
+- An Apple Silicon Mac running macOS 27
+- Apple Intelligence turned on, for the AI cleanup. Dictation still works without it,
+  with only the basic tidy-up.
 
-Needs an Apple Silicon Mac on macOS 27. Turn on Apple Intelligence for AI cleanup.
+1. Drag ${APP_NAME} to Applications.
+2. Open it from Applications. macOS will block it the first time: this app is free and
+   open source, and it is not signed with a paid Apple Developer ID, so macOS cannot
+   check who made it. That block is macOS doing its job. System Settings offers
+   "Open Anyway" next to the message about ${APP_NAME}; if you cannot see it, search
+   "Open Anyway" in System Settings. It is a one-time step.
+3. Grant Microphone and Accessibility when asked. On macOS 27, Accessibility lives
+   under System Settings > Device Control and Data Access. Then quit and reopen the app.
+4. Look for the icon in the menu bar. There is no window. Hold control-command to talk,
+   release to insert.
+
+Updating:
+The app tells you in the menu bar when a newer version is out and links to the release
+page. It never downloads or installs anything itself. To update: quit the app, download
+the new disk image from the release page, drag the app to Applications to replace the
+old one, and reopen. macOS may ask for Microphone and Accessibility again after an
+update: switch them back on if the hotkeys stop working.
+
+Your words stay on this Mac unless you turn on a custom service in Settings. With a
+custom address, only the routes you switch (speech, cleanup, or both) go to that
+address, plus your API key when the service asks for one. With no address, nothing
+leaves the Mac except a daily check to GitHub for a newer version, which sends only
+the app name and version.
 README
 
 rm -f "$DMG"
