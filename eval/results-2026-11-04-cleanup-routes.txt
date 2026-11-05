@@ -5,27 +5,31 @@ the person's tidied words are inserted instead. The service route ran a local
 instruction model over the loopback address, warmed, one request at a time.
 
 FIRE THE FALLBACK  (per mode, 50 dictations each; final numbers after the
-currency rule was added to the guard)
+currency, time-of-day and dot-folding rules joined the guard)
   mode              apple    apple caught   service   service caught   errors
   Polish            10.0%             5     6.0%                 3      0
-  Concise           24.0%            12     14.0%                7      0
-  Active Voice      20.0%            10     16.0%                8      0
-  Rewrite           18.0%             9     14.0%                7      0
+  Concise           22.0%            11     12.0%                6      0
+  Active Voice      24.0%            12     14.0%                7      0
+  Rewrite           18.0%             9     6.0%                 3      0
 
 TIMING (seconds per cleanup, median, service warm)
-  apple    0.5    0.5    0.5    0.4
-  service  0.2    0.1    0.1    0.1
+  apple    0.5    0.5    0.6    0.4
+  service  0.1    0.1    0.1    0.1
 
 Notes:
 - The service set needs no new limits: its refusal rate sits BELOW Apple's in
   every mode. The limits tuned for Apple's model hold for a general model too.
-- Rerun after the guard learned to refuse a currency symbol the speaker never
-  gave (the first service run turned "4.2 million" into "$4.2 million" and
-  passed): Apple rates are unchanged to the item, and the service moved only
-  by ordinary sampling variation between identical model versions. Zero
-  inserted answers carry an invented currency sign.
-- All failures were the guard rejecting a changed number or a dropped word;
-  there were no connection or key errors in any run.
+- Two reruns happened as the guard grew. After the currency rule: Apple
+  unchanged, service 6.0 / 14.0 / 16.0 / 14.0. After the a.m./p.m. rule and
+  the dot folding, this final table: Apple's Concise eased one item (a dot
+  restyle no longer counts as new words), Apple's Active Voice gained two
+  (one is a genuine invention: a question about when the pharmacy opens came
+  back "opens at 8 a.m. tomorrow", neither said nor asked for), and the
+  service eased in Concise, Active Voice and Rewrite, again restyle items,
+  not lost teeth. Zero inserted answers carry an invented currency sign or
+  time of day.
+- All failures were the guard rejecting a changed number, an added marker or
+  a dropped word; there were no connection or key errors in any run.
 - Regenerate any row with: cleanup-eval clean <corpus.json> <variant> (and the
   service_<variant> forms, whose address, model and key the environment names);
   corpus.json comes from eval/corpus.py. Raw run output is not kept here.

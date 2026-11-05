@@ -24,11 +24,12 @@ Notes:
   as the backstop; its own unit tests cover 3pm, 3 p.m., 3:00 PM, the
   dotted form after a spelled hour, a spoken p.m. passing, and "I am"
   never counting as a marker in either direction.
-- 15 of the 80 runs were stamps for a different, older reason: t2 is a
-  question and the Concise and Active Voice answers on both routes
-  returned it as a plain command ("Pick up the prescription"), which the
-  question rule has always refused. The tidied words went in instead,
-  with no notice noise and no invented time.
+- 16 of the 80 runs were stamps for a different, older reason: t2 is a
+  question and the Concise and Active Voice answers mostly returned it as
+  a plain command ("Pick up the prescription"), which the question rule
+  has always refused. The tidied words went in instead, and the pill now
+  says so; no invented time was involved. This run used the final guard,
+  whose hour words read team and cream as letters, not clocks.
 - Regenerate with: time-eval (its own corpus lives in eval/time-corpus.json;
   runs-per-mode and an alternate corpus path are its two optional
   arguments). The service side runs when the environment names its address,
