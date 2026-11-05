@@ -1,4 +1,5 @@
 import XCTest
+@testable import QuickScribe
 @testable import QuickScribeCore
 
 /// A live check against a real OpenAI-compatible server, run only when asked
@@ -45,7 +46,7 @@ final class LiveEndpointCheckTests: XCTestCase {
            let d = FileManager.default.contents(atPath: (wavPath as NSString).expandingTildeInPath) {
             wav = d
         } else {
-            wav = SettingsWindowSilence.wav   // 0.3 s of silence
+            wav = SettingsWindow.silenceWAV()   // the app's own clip, one version only
         }
         do {
             let text = try await client.transcribe(wav: wav, model: audioModel)
@@ -69,24 +70,5 @@ final class LiveEndpointCheckTests: XCTestCase {
         } catch {
             XCTFail("cleanup: \((error as? EndpointError)?.message ?? "\(error)")")
         }
-    }
-}
-
-/// Mirror of the app's test-connection silence clip, kept here so the test
-/// target does not depend on the app bundle for it.
-enum SettingsWindowSilence {
-    static var wav: Data {
-        let seconds = 0.3, rate = 16_000
-        let samples = Int(seconds * Double(rate))
-        let pcm = samples * 2
-        var data = Data()
-        func ascii(_ s: String) { data.append(Data(s.utf8)) }
-        func u32(_ v: Int) { withUnsafeBytes(of: UInt32(v).littleEndian) { data.append(contentsOf: $0) } }
-        func u16(_ v: Int) { withUnsafeBytes(of: UInt16(v).littleEndian) { data.append(contentsOf: $0) } }
-        ascii("RIFF"); u32(36 + pcm); ascii("WAVE")
-        ascii("fmt "); u16(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16)
-        ascii("data"); u32(pcm)
-        data.append(Data(count: pcm))
-        return data
     }
 }
