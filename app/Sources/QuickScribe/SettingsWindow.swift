@@ -142,7 +142,9 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
             do {
                 try PromptLibrary.validate(instructions)
                 let run = self.promptTester ?? Self.runPromptTest
-                message = try await run(route, sample, instructions, settings, self.endpointStore.apiKey())
+                // The Keychain is opened only for the route that sends it a key.
+                let key = route == .service ? self.endpointStore.apiKey() : nil
+                message = try await run(route, sample, instructions, settings, key)
             } catch let failure as CleanupFailure {
                 message = Self.explain(failure)
             } catch let failure as EndpointError {

@@ -153,4 +153,48 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertFalse(PromptLibrary(fileURL: url).entry("polish")?.custom ?? true)
     }
 
+    /// The prompt test opens the Keychain only for the service route.
+    func testPromptTestReadsTheKeyOnlyOnTheServiceRoute() async throws {
+        final class CountingSecrets: SecretStoring, @unchecked Sendable {
+            private let lock = NSLock()
+            private var n = 0
+            func secret() -> String? { lock.lock(); n += 1; lock.unlock(); return "k" }
+            func setSecret(_ value: String?) throws {}
+            var reads: Int { lock.lock(); defer { lock.unlock() }; return n }
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
+        let suite = "qs-settings-keys-\(UUID().uuidString)"
+        let secrets = CountingSecrets()
+        let store = EndpointSettingsStore(defaults: UserDefaults(suiteName: suite)!, secrets: secrets)
+        let settings = SettingsWindow(library: PromptLibrary(fileURL: url), endpointStore: store)
+        settings.show()
+        defer {
+            settings.window?.close()
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        }
+        let root = try XCTUnwrap(settings.window?.contentView)
+        var keys: [String?] = []
+        settings.promptTester = { _, _, _, _, key in keys.append(key); return "done" }
+        let test = button("Test Prompt", root)
+        func run() async throws {
+            test.performClick(nil)
+            for _ in 0..<150 where !test.isEnabled { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        let shown = secrets.reads   // the connection field echoes the stored key on load
+        try await run()
+        XCTAssertEqual(secrets.reads, shown, "the Apple route never opens the Keychain")
+        XCTAssertNil(keys.last ?? nil)
+
+        let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
+        address.stringValue = "http://127.0.0.1:1234/v1"
+        address.sendAction(address.action!, to: address.target)
+        let cleanup = all(NSPopUpButton.self, in: root)[1]
+        cleanup.selectItem(at: 1)
+        cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        let before = secrets.reads
+        try await run()
+        XCTAssertEqual(secrets.reads, before + 1, "one read, exactly when the service answers")
+        XCTAssertEqual(keys.last ?? nil, "k")
+    }
+
 }
