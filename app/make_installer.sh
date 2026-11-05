@@ -23,10 +23,10 @@ What it needs, before you start:
 1. Drag ${APP_NAME} to Applications.
 2. Open it from Applications. macOS will block it the first time: this app is free and
    open source, and it is not signed with a paid Apple Developer ID, so macOS cannot
-   check who made it. That block is macOS doing its job. Try opening the app once more
-   first: "Open Anyway" only appears in System Settings after a launch attempt has been
-   blocked, and it does not stay on screen for long, so open System Settings right after
-   a blocked attempt and click it. If you cannot see it where you are, search
+   check who made it. That block is macOS doing its job. Then open System Settings:
+   "Open Anyway" appears there only after a launch attempt has actually been blocked, and
+   it stays available for about an hour after the attempt. Click it where it appears next
+   to the message about ${APP_NAME}. If you cannot see it where you are, search
    "Open Anyway" in System Settings. It is a one-time step.
 3. Grant Microphone and Accessibility when asked. On macOS 27, Accessibility lives
    under System Settings > Device Control and Data Access. Then quit and reopen the app.

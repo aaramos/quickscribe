@@ -19,11 +19,11 @@ route can point at your own OpenAI-compatible service instead (see below).
 1. Open `QuickScribe.dmg` and drag the app to Applications.
 2. Open it from Applications. macOS will block it the first time, because this free,
    open-source app isn't signed with a paid Apple Developer ID: macOS can't check who made
-   it, so it asks you. Try opening it once more first: **Open Anyway** only appears in
-   System Settings after a launch attempt has actually been blocked, and it doesn't stay
-   on screen for long. So go to System Settings right after a blocked attempt and click
-   Open Anyway where it appears next to the message about QuickScribe; if you don't see
-   it where you are, search "Open Anyway" in System Settings. This is a one-time step.
+   it, so it asks you. Then go to System Settings: **Open Anyway** appears there only
+   after a launch attempt has actually been blocked, and it stays available for about an
+   hour after the attempt. Click it where it appears next to the message about
+   QuickScribe; if you don't see it where you are, search "Open Anyway" in System
+   Settings. This is a one-time step.
 3. Grant Microphone and Accessibility when asked, then quit and reopen the app.
 4. Look for the icon in the menu bar. There's no window.
 
