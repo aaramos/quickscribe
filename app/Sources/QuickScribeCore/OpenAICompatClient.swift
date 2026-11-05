@@ -39,19 +39,22 @@ public struct OpenAICompatClient: Sendable {
     public var timeout: TimeInterval
     private let session: URLSession
 
+    /// One session for every client: later tickets build a client per
+    /// dictation, and fresh sessions each time would throw away connection
+    /// reuse. Ephemeral: no cookies or cache ever touch the disk.
+    public static let sharedSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30      // per-call timeout rides on each request
+        config.timeoutIntervalForResource = 20 * 60
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
     public init(settings: EndpointSettings, apiKey: String?, timeout: TimeInterval = 30, session: URLSession? = nil) {
         self.settings = settings
         self.apiKey = apiKey
         self.timeout = timeout
-        if let session {
-            self.session = session
-        } else {
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = timeout
-            config.timeoutIntervalForResource = timeout * 4   // first call may load a model
-            config.waitsForConnectivity = false
-            self.session = URLSession(configuration: config)
-        }
+        self.session = session ?? Self.sharedSession
     }
 
     private var base: URL {
@@ -99,19 +102,9 @@ public struct OpenAICompatClient: Sendable {
 
     public func listModels() async -> [String] {
         // Used to fill pickers; a service that does not list models is fine,
-        // the person types names instead.
-        guard (try? base) != nil else { return [] }
-        do {
-            let url = try base.appendingPathComponent("models")
-            let (data, response) = try await session.data(for: request(to: url))
-            guard let http = response as? HTTPURLResponse else { return [] }
-            guard try Self.classify(status: http.statusCode, transport: nil, what: "models") == nil else { return [] }
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["data"] as? [[String: Any]] else { return [] }
-            return items.compactMap { $0["id"] as? String }.sorted()
-        } catch {
-            return []
-        }
+        // the person types names instead. Failures read as an empty list.
+        if case .success(let ids) = await checkModels() { return ids }
+        return []
     }
 
     /// Same call, but reports why it failed. Test Connection uses this so a
