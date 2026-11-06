@@ -78,6 +78,12 @@ public enum CleanupGuard {
         units[word] == nil && scales[word] == nil && !word.allSatisfy(\.isNumber)
     }
 
+    // Fold a dotted time marker to its plain form. Match the marker itself, NOT
+    // "the marker plus a trailing space": an end-of-sentence "3 p. m." has no
+    // space after it to match, and consuming a following space would glue the next
+    // word on ("p. m. today" into "pmtoday"). Both must fold to "pm today", so a
+    // faithful cleanup of a spaced marker is never refused. Inventors are caught
+    // separately by inventsTimeOfDay, which does not lean on this fold.
     private static func foldTimeDots(_ text: String) -> String {
         var folded = text
         for dotted in ["a.m.", "a. m.", "p.m.", "p. m."] {

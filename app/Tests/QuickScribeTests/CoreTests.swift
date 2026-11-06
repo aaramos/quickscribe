@@ -200,6 +200,25 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertFalse(CleanupGuard.accepts(output: "Meet at 3 p.m. Friday.",
                                             input: Friday, mode: "rewrite"))
     }
+    func testSpacedMarkersFoldWhereverTheyStand() {
+        // A dotted marker folds to the plain form wherever it sits in the
+        // sentence. Matching only "marker plus trailing space" was a trap: an
+        // end-of-sentence "3 p. m." then never folded, and gluing on the
+        // swallowed space turned "p. m. today" into "pmtoday". A faithful
+        // cleanup of a spaced marker passes both ways; an invented one does not.
+        XCTAssertTrue(CleanupGuard.accepts(output: "Call me at 3 p. m.",
+                                           input: "call me at three pm", mode: "polish"),
+                      "the marker at the end of a sentence still folds")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Call me at 3 pm today.",
+                                           input: "call me at three p. m. today", mode: "polish"),
+                      "the speaker's spaced dots fold too, without gluing the next word on")
+        XCTAssertTrue(CleanupGuard.accepts(output: "Call me at 3 p. m. on Friday.",
+                                           input: "call me at three pm on friday", mode: "polish"),
+                      "more words follow the marker and keep their space")
+        XCTAssertFalse(CleanupGuard.accepts(output: "Call me at 3 p. m.",
+                                            input: "call me at three", mode: "polish"),
+                       "a spaced p. m. the speaker never said remains an invention")
+    }
     func testEveryMarkerIsTiedToItsOwnNumber() {
         // Currency. One said dollar clears only its own number.
         XCTAssertFalse(CleanupGuard.accepts(
