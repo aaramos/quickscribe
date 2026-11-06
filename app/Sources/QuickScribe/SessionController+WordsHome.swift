@@ -89,7 +89,7 @@ extension SessionController {
             return
         }
         // The person's own prompt applies to both routes; the factory texts
-        // differ: Apple's short tuned set, or the longer sidecar set.
+        // differ: Apple's short tuned set, or the longer set written for general services.
         let instructions = prompts.prompt(prof, route: route)
         let cleaner = cleaner ?? activeCleaner(settings: settings, route: route)
         Task { [weak self] in

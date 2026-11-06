@@ -17,7 +17,7 @@ final class CleanupPromptsTests: XCTestCase {
 
     func testServicePolishIsTheLongerSetAndApplePolishStaysShort() {
         XCTAssertGreaterThan(ServicePrompts.polish.count, FactoryPrompts.polish.count + 400,
-                             "the sidecar set is the long one Apple's short prompt was not tuned for")
+                             "the service set is the long one Apple's short prompt was not tuned for")
         XCTAssertTrue(ServicePrompts.polish.contains("publication-ready"))
         XCTAssertFalse(FactoryPrompts.polish.contains("publication-ready"),
                        "Apple's short Polish stays short")

@@ -181,7 +181,7 @@ final class SessionCleanupRouteTests: XCTestCase {
     }
 
     func testRewriteRunsOnBothRoutes() async throws {
-        // The ⌃⌘⇧ profile over the service: the old sidecar's Rewrite text is
+        // The ⌃⌘⇧ profile over the service: the earlier version's Rewrite text is
         // what a service gets as its system prompt.
         store.save(EndpointSettings(address: service.baseURL, cleanupModel: "tidier", useCustomCleanup: true))
         session.selectProfile("rewrite")

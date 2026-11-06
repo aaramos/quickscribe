@@ -166,7 +166,7 @@ public struct OpenAICompatClient: Sendable {
 
     // MARK: - POST /chat/completions (streaming)
 
-    /// Ported from the sidecar cleanup client that ran in production: system
+    /// Ported from an earlier version's cleanup client, which ran in production: system
     /// and user messages, streamed tokens, thinking off, and `finish_reason:
     /// length` treated as a failure because cut-off prose looks finished.
     public func clean(text: String, model: String, systemPrompt: String) async throws -> String {

@@ -51,7 +51,7 @@ public final class PromptLibrary {
     }
 
     /// Apple's short prompts fit Apple's model; a general service gets the
-    /// longer sidecar set. A person's own prompt for a mode wins on BOTH
+    /// longer set. A person's own prompt for a mode wins on BOTH
     /// routes, because it is their wording, not our tuning.
     public func prompt(_ mode: String, route: CleanupRoute = .apple) -> String {
         if mode == FactoryPrompts.rewriteID {
