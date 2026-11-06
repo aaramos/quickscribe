@@ -57,17 +57,34 @@ CNF
     -name "$NAME" -out "$WORK/identity.p12" -passout pass:once \
     -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
 
-# -A rather than a codesign-only ACL: the tested behavior of the named-app
-# variant still gated access behind a confirmation. The keychain password, if
+# -T names exactly one user of the key: codesign, and no other program. An
+# -A here would let anything running under this account use the release key
+# without asking, and this key is what makes an update count as the same app
+# in a friend's Microphone and Accessibility grants. The confirmation dialog
+# below is the restriction working, not a defect. The keychain password, if
 # macOS asks for it, is typed by whoever runs this: never put it on a command line.
-security import "$WORK/identity.p12" -k "$KEYCHAIN" -P once -T /usr/bin/codesign -A
+security import "$WORK/identity.p12" -k "$KEYCHAIN" -P once -T /usr/bin/codesign
 rm -f "$WORK/identity.p12"
 
-if security find-certificate -c "$NAME" -Z "$KEYCHAIN" >/dev/null 2>&1; then
-    echo "==> \"$NAME\" is in $KEYCHAIN, valid to $(/usr/bin/openssl x509 -in "$WORK/cert.pem" -noout -enddate | cut -d= -f2)"
-    echo "    build releases with:  CODESIGN_IDENTITY=\"$NAME\" ./make_installer.sh"
-    echo "    (an ordinary ./build_app.sh stays ad-hoc, for anyone building from source)"
-else
+if ! security find-certificate -c "$NAME" -Z "$KEYCHAIN" >/dev/null 2>&1; then
     echo "FATAL: import reported no error but the certificate is not in $KEYCHAIN" >&2
     exit 1
 fi
+
+# Wake the confirmation now, while a person is sitting at this Mac, rather
+# than in the middle of someone's first release build: sign one small
+# throwaway file. macOS asks once whether codesign may use the key; choosing
+# Always Allow answers for every build after this. If the dialog is refused
+# or missed, nothing is broken: the next signing asks again.
+echo "==> expect a confirmation: macOS asks to let codesign use the new key; choose Always Allow"
+cp /usr/bin/true "$WORK/probe"
+if codesign --force -s "$NAME" "$WORK/probe"; then
+    echo "==> probe signed: the key works and its use is remembered"
+else
+    echo "==> the probe was not signed. The certificate itself is in place;"
+    echo "    answer the confirmation next time something signs with it."
+fi
+
+echo "==> \"$NAME\" is in $KEYCHAIN, valid to $(/usr/bin/openssl x509 -in "$WORK/cert.pem" -noout -enddate | cut -d= -f2)"
+echo "    build releases with:  CODESIGN_IDENTITY=\"$NAME\" ./make_installer.sh"
+echo "    (an ordinary ./build_app.sh stays ad-hoc, for anyone building from source)"
