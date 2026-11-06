@@ -30,12 +30,16 @@ final class SigningScriptTests: XCTestCase {
     }
 
     func testTheFirstUseConfirmationIsAnnouncedAndTriggered() throws {
-        // The script is expected to warn in plain words before it wakes the
-        // dialog, and to wake it itself with a throwaway signing, so the
-        // click happens during the one-time setup and not mid-release.
+        // The script warns in plain words, THEN signs a throwaway file, so if
+        // macOS is going to ask about the key it asks during the one-time setup
+        // and not mid-release. Most imports name codesign as the key's user up
+        // front and no dialog ever appears, so the text must offer the ask as
+        // a possibility, never promise one.
         let text = try scriptText()
-        XCTAssertTrue(text.contains("Always Allow"), "the person must be told what to click")
+        XCTAssertTrue(text.contains("may ask"), "the confirmation is offered, not promised")
+        XCTAssertFalse(text.contains("expect a confirmation"), "no outcome may be promised")
+        XCTAssertTrue(text.contains("Always Allow"), "the person is told what to click if it appears")
         XCTAssertTrue(text.contains("codesign --force -s \"$NAME\""),
-                      "the script signs a probe file so macOS asks once, during setup")
+                      "the script signs a probe file so any question comes during setup")
     }
 }

@@ -41,7 +41,7 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertEqual(out, "Cleaned\ntext")   // line-end spaces removed
     }
 
-    func testRequestShapeMatchesThePortedSidecarClient() async throws {
+    func testRequestShapeMatchesThePortedClient() async throws {
         service.queue(service.text(sse("ok")), forPath: "/v1/chat/completions")
         _ = try await client.clean(text: String(repeating: "x", count: 200), model: "tidier", systemPrompt: "be clean")
         let req = try XCTUnwrap(service.lastRequest)

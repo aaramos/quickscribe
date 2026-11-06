@@ -60,9 +60,11 @@ CNF
 # -T names exactly one user of the key: codesign, and no other program. An
 # -A here would let anything running under this account use the release key
 # without asking, and this key is what makes an update count as the same app
-# in a friend's Microphone and Accessibility grants. The confirmation dialog
-# below is the restriction working, not a defect. The keychain password, if
-# macOS asks for it, is typed by whoever runs this: never put it on a command line.
+# in a friend's Microphone and Accessibility grants. If the probe at the end
+# shows a dialog, that is the restriction working, not a defect; no dialog is
+# normal too, because codesign was named as the key's user at import. The
+# keychain password, if macOS asks for it, is typed by whoever runs this:
+# never put it on a command line.
 security import "$WORK/identity.p12" -k "$KEYCHAIN" -P once -T /usr/bin/codesign
 rm -f "$WORK/identity.p12"
 
@@ -71,15 +73,16 @@ if ! security find-certificate -c "$NAME" -Z "$KEYCHAIN" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Wake the confirmation now, while a person is sitting at this Mac, rather
-# than in the middle of someone's first release build: sign one small
-# throwaway file. macOS asks once whether codesign may use the key; choosing
-# Always Allow answers for every build after this. If the dialog is refused
-# or missed, nothing is broken: the next signing asks again.
-echo "==> expect a confirmation: macOS asks to let codesign use the new key; choose Always Allow"
+# Sign one throwaway file now, while a person is sitting at this Mac, rather
+# than in the middle of someone's first release build. macOS may ask whether
+# codesign may use the key; if a dialog appears, Always Allow answers for
+# every build after this. No dialog is the normal result when codesign was
+# already named as the key's user at import. If a dialog is refused or
+# missed, nothing is broken: the next signing asks again.
+echo "==> macOS may ask to let codesign use the new key; if a dialog appears, choose Always Allow"
 cp /usr/bin/true "$WORK/probe"
 if codesign --force -s "$NAME" "$WORK/probe"; then
-    echo "==> probe signed: the key works and its use is remembered"
+    echo "==> probe signed: the key works"
 else
     echo "==> the probe was not signed. The certificate itself is in place;"
     echo "    answer the confirmation next time something signs with it."
