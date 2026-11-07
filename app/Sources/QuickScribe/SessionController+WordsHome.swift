@@ -77,7 +77,8 @@ extension SessionController {
     private func polishAndInsert(raw: String) {
         let gen = generation
         let prof = profile
-        let settings = endpointStore.load()
+        // This dictation's settings, not whatever the menu says now.
+        let settings = routeSettings()
         let route = Self.cleanupRoute(settings: settings)
         let spent = releaseAt.map { clock().timeIntervalSince($0) } ?? 0
         // Apple's model only gates Apple's route. A service route always

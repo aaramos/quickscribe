@@ -97,6 +97,10 @@ final class SessionController {
     /// could not refuse (a fan, traffic). Cleared with every new session, so
     /// it can only describe the session it came from.
     var serviceHeardNoSpeech = false
+    /// The settings this dictation started with. Read once at start and used
+    /// for the whole session, so a choice made while it records (the menu can
+    /// be used during hands-free) never changes the dictation in progress.
+    var sessionSettings: EndpointSettings?
 
     /// Menu bar needs to know when sessions start/end (icon state, menu disable).
     var onPhaseChange: ((Bool) -> Void)?
@@ -229,6 +233,10 @@ final class SessionController {
         // about the last one's noise.
         pendingNotice = nil
         serviceHeardNoSpeech = false
+        // One copy of the settings for the whole dictation: what the menu says
+        // now cannot change the route or the model of a dictation already
+        // recording, only the next one.
+        sessionSettings = endpointStore.load()
         // Only a session whose speech route is the service keeps the whole
         // recording; Apple speech needs nothing beyond the live recognizer.
         armRecording()
@@ -263,7 +271,13 @@ final class SessionController {
     /// start()'s buffer decision, split out so tests can watch both routes
     /// without a microphone.
     func armRecording() {
-        recording = endpointStore.load().speechUsesEndpoint ? RecordingBuffer() : nil
+        recording = routeSettings().speechUsesEndpoint ? RecordingBuffer() : nil
+    }
+
+    /// The settings in force for this dictation: the copy taken at start, or
+    /// the live ones when a session never started (tests drive releases).
+    func routeSettings() -> EndpointSettings {
+        sessionSettings ?? endpointStore.load()
     }
 
     /// What the whole recording gets used for. Kept pure so the rules the
@@ -307,7 +321,7 @@ final class SessionController {
         let clip = recording?.wav()       // waits for every buffer already in flight
         recording?.discard()              // discard, not clear: a late buffer must not grow it back
         recording = nil
-        let settings = endpointStore.load()
+        let settings = routeSettings()
         let route = Self.speechRoute(customChosen: customChosen,
                                      overflowed: clip?.overflowed ?? false,
                                      silent: silent,

@@ -113,6 +113,72 @@ final class SessionReleaseTests: XCTestCase {
         XCTAssertEqual(session.pillLog.last, .degraded, "no notice earned, so the plain result pill shows")
     }
 
+    // MARK: - Z4: a choice applies to the next dictation, never this one
+
+    /// The settings are taken once when the dictation starts. A menu choice
+    /// made while it records (easy in hands-free) must not change the route or
+    /// the model of the dictation already running.
+    func testAChoiceMadeMidSessionDoesNotChangeTheDictationInProgress() async {
+        chooseAppleSpeech()                        // this dictation is an Apple one
+        session.sessionSettings = store.load()     // what start() would have taken
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = false
+        let live = StubSpeech(.words("Apple words for this one."))
+        session.processRelease(customChosen: false, silent: false, live: live)
+        await waitUntil { self.insertedAfter != nil }
+        XCTAssertEqual(self.insertedAfter, "Apple words for this one.")
+
+        // The person now switches cleanup (and speech) to the service, mid-way
+        // through nothing: the NEXT dictation must use it.
+        var s = store.load()
+        s.address = "http://127.0.0.1:1234/v1"
+        s.useCustomSpeech = true
+        s.useCustomCleanup = true
+        s.speechModel = "speechy"
+        s.cleanupModel = "tidier"
+        store.save(s)
+        XCTAssertTrue(store.load().cleanupUsesEndpoint, "the saved choice did change")
+        XCTAssertFalse(session.routeSettings().cleanupUsesEndpoint,
+                       "the finished session kept the settings it started with")
+
+        // A fresh session takes the new ones.
+        session.sessionSettings = nil
+        session.sessionSettings = store.load()
+        XCTAssertTrue(session.routeSettings().cleanupUsesEndpoint,
+                      "the next dictation starts with the new choice")
+    }
+
+    /// The speech half stays put too: a model chosen while the dictation
+    /// records must not change the model the upload uses, nor the route.
+    func testASpeechModelChosenMidSessionIsNotTheOneUploaded() async {
+        chooseCustomSpeech()                        // speech model "speechy"
+        session.sessionSettings = store.load()
+        session.armRecording()                      // what start() would have armed
+        guard let recording = session.recording else { return XCTFail("no buffer") }
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22_050)!
+        b.frameLength = 22_050
+        recording.append(b)
+        okTranscription("speechy words")
+        // Switched mid-session to another model, and to Apple cleanup.
+        var s = store.load()
+        s.speechModel = "some-other-model"
+        s.useCustomCleanup = false
+        store.save(s)
+        session.appleModelReadyOverride = false
+        session.releaseAt = base
+        let live = StubSpeech(.hangs(returnsOnCancel: nil))
+        session.processRelease(customChosen: session.recording != nil, silent: false, live: live)
+        await waitUntil { self.insertedAfter != nil }
+        XCTAssertEqual(self.insertedAfter, "speechy words")
+        let upload = try? XCTUnwrap(service.received.first { $0.path.contains("transcriptions") })
+        let body = String(decoding: upload?.body ?? Data(), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"model\"\r\n\r\nspeechy"), body)
+        XCTAssertFalse(body.contains("some-other-model"),
+                       "the model chosen mid-session must not be the one uploaded")
+    }
+
     func testCustomSessionDiscardsItsBufferAtRelease() async {
         chooseCustomSpeech()
         armedClip()
