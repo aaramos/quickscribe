@@ -35,7 +35,8 @@ What it needs, before you start:
     If the menu bar says hotkeys are off but ${APP_NAME} already looks switched on there,
     remove it with the minus button and add it again.
 4. Look for the icon in the menu bar. There is no window. Hold control-command to talk,
-   release to insert.
+   release to insert. The menu has Mode, Speech Model and Clean Up Model submenus, each
+   naming the choice in use.
 
 Updating:
 The app asks GitHub at launch and once a day. When a newer version is out you get one
@@ -52,11 +53,14 @@ hotkeys are dead, remove ${APP_NAME} from that list with the minus button and ad
 again. Coming from version 1.0, which had a throwaway signature, expect to
 grant permissions once more whatever you do.
 
-Your words stay on this Mac unless you turn on a custom service in Settings. With a
-custom address, only the routes you switch (speech, cleanup, or both) go to that
-address, plus your API key when the service asks for one. With no address, nothing
-leaves the Mac except the version check at launch and once a day, which sends only the
-app name and version; like any web request, it lets GitHub see your network address.
+Your words stay on this Mac unless you set an address in Settings > Inference server.
+With an address, the routes you switch in the menu bar (speech, cleanup, or both) go to
+that address, plus your API key when the service asks for one. Press Test Connection
+there to see how many speech and clean up models it has; choose them from the Speech
+Model and Clean Up Model submenus, where Apple Native is always first. With no address,
+only Apple Native is offered, and nothing leaves the Mac except the version check at
+launch and once a day, which sends only the app name and version; like any web request,
+it lets GitHub see your network address.
 README
 
 rm -f "$DMG"

@@ -35,8 +35,9 @@ To build the installer yourself, run `app/make_installer.sh`.
 ## How to use it
 
 - Hold **⌃⌘** to talk and release to insert. Press any other key or Esc to cancel.
-- Pick a mode with **⌃⌘1** Polish, **⌃⌘2** Concise or **⌃⌘3** Active Voice, from the menu
-  bar, or by saying "switch to concise" at the start of a dictation.
+- Pick a mode with **⌃⌘1** Polish, **⌃⌘2** Concise or **⌃⌘3** Active Voice, from the
+  **Mode** submenu in the menu bar, or by saying "switch to concise" at the start of a
+  dictation. The submenu's title shows the mode in use.
 - Hold **⌃⌘⇧** to Rewrite one dictation.
 - Edit each mode's instructions in **Settings…**, and try them on sample text there.
 
@@ -58,8 +59,11 @@ dead, remove QuickScribe from that list with the minus button and add it again. 
 By default everything runs on Apple's on-device models and no words leave the Mac.
 Settings can point speech, cleanup, or both at any OpenAI-compatible address you run
 (`/v1`). Set the address, add an API key if your service needs one (kept in the Keychain),
-pick the Speech and Cleanup models by name, and press Test Connection to check the four
-things it needs to work. With no address set, Apple's models are used.
+and press Test Connection: it says how many speech and clean up models the service has.
+The models themselves are picked in the menu bar, from the **Speech Model** and **Clean Up
+Model** submenus, which always list Apple Native first. Speech and cleanup are independent,
+so any mix of Apple and your server works, and a choice applies from the next dictation.
+With no address set, only Apple Native is offered.
 
 If the address is not on this Mac or your local network, your words and your key travel
 to it, and they are only encrypted if the address uses https; plain http to a remote
@@ -96,7 +100,7 @@ Apple's on-device cleanup may leave some self-corrections in, and a custom servi
 If nothing that accepts text has focus, the cleaned-up text goes on the clipboard instead
 and the overlay says so. With Apple's models (the default) dictated text never leaves the
 Mac, never goes in the logs, and isn't saved: there is no history. If you set a custom
-service in Settings, only the routes you switched to Custom go to that address. Edited
+service in Settings, only the routes you switched to your server go to that address. Edited
 prompts are saved in `~/Library/Application Support/QuickScribe/prompts.json`.
 
 ## Build and test
