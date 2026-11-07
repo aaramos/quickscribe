@@ -264,6 +264,22 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertNotEqual(boundaryOf(first), boundaryOf(second))
     }
 
+    /// One limit covers both uploads. The 400 arrives at 0.4 s of a 0.6 s
+    /// limit, so the retry may only use the 0.2 s left. Its answer comes 0.5 s
+    /// later: a retry with a fresh 0.6 s would have succeeded, so this fails
+    /// unless the retry really shares the first upload's limit.
+    func testTheRetryGetsOnlyWhatIsLeftOfTheLimit() async throws {
+        let shared = OpenAICompatClient(settings: settings, apiKey: nil, timeout: 0.6)
+        service.queue(service.text(#"{"error":"bad"}"#, status: 400, delay: 0.4),
+                      forPath: "/v1/audio/transcriptions")
+        service.queue(service.text(#"{"text":"too late"}"#, delay: 0.5),
+                      forPath: "/v1/audio/transcriptions")
+        await XCTAssertThrowsErrorAsync(try await shared.transcribeDetailed(wav: Data([1]), model: "speechy")) {
+            XCTAssertEqual($0 as? EndpointError, .timedOut)
+        }
+        XCTAssertEqual(service.received.count, 2, "the retry was sent, but inside the same limit")
+    }
+
     func testASecondRefusalSurfacesAfterExactlyTwoRequests() async throws {
         for _ in 0..<2 { service.queue(service.text(#"{"error":"bad"}"#, status: 400), forPath: "/v1/audio/transcriptions") }
         await XCTAssertThrowsErrorAsync(try await self.client.transcribeDetailed(wav: Data([1]), model: "speechy")) {
@@ -369,6 +385,30 @@ final class OpenAICompatClientTests: XCTestCase {
         service.queue(service.text(#"{"data":[{"id":"b-model"},{"id":"a-model"},{"nodata":1}]}"#), forPath: "/v1/models")
         let ids = await client.listModels()
         XCTAssertEqual(ids, ["a-model", "b-model"])
+    }
+
+    /// The owner's server sends a model_type per model; a plain server sends
+    /// none. Both must arrive, and the plain one must not gain a guess.
+    func testModelTypesAreReadAndAnAbsentTypeStaysAbsent() async throws {
+        service.queue(service.text(#"""
+        {"data":[
+          {"id":"whisper-large-v3-8bit","model_type":"audio_stt"},
+          {"id":"Qwen3.8-27B-4bit","model_type":"vlm"},
+          {"id":"Qwen3-Embedding-0.6B-4bit-DWQ","model_type":"embedding"},
+          {"id":"gpt-4o"}
+        ]}
+        """#), forPath: "/v1/models")
+        guard case .success(let entries) = await client.fetchModels() else { return XCTFail("fetch failed") }
+        XCTAssertEqual(entries.map(\.id), ["Qwen3-Embedding-0.6B-4bit-DWQ", "Qwen3.8-27B-4bit", "gpt-4o", "whisper-large-v3-8bit"])
+        XCTAssertEqual(entries.first { $0.id == "whisper-large-v3-8bit" }?.modelType, "audio_stt")
+        XCTAssertEqual(entries.first { $0.id == "Qwen3.8-27B-4bit" }?.modelType, "vlm")
+        XCTAssertNil(entries.first { $0.id == "gpt-4o" }?.modelType,
+                     "a service that sends no type must not be given one here")
+
+        // The plain helper still answers ids only, for every older caller.
+        service.queue(service.text(#"{"data":[{"id":"b"},{"id":"a"}]}"#), forPath: "/v1/models")
+        let ids = await client.listModels()
+        XCTAssertEqual(ids, ["a", "b"])
     }
 
     func testModelListEmptyOnFailureIsEmptyNotNull() async {

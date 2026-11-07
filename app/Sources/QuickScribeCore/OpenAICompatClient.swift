@@ -101,13 +101,22 @@ public struct OpenAICompatClient: Sendable {
     public func listModels() async -> [String] {
         // Used to fill pickers; a service that does not list models is fine,
         // the person types names instead. Failures read as an empty list.
-        if case .success(let ids) = await checkModels() { return ids }
+        if case .success(let entries) = await fetchModels() { return entries.map(\.id) }
         return []
     }
 
     /// Same call, but reports why it failed. Test Connection uses this so a
     /// refused key reads differently from an address that never answered.
     public func checkModels() async -> Result<[String], EndpointError> {
+        switch await fetchModels() {
+        case .success(let entries): return .success(entries.map(\.id))
+        case .failure(let error): return .failure(error)
+        }
+    }
+
+    /// The service's models, with the type it names for each one. Alphabetical
+    /// by id, as every caller has always seen them.
+    public func fetchModels() async -> Result<[ModelEntry], EndpointError> {
         do {
             let url = try base.appendingPathComponent("models")
             let (data, response) = try await session.data(for: request(to: url))
@@ -118,7 +127,10 @@ public struct OpenAICompatClient: Sendable {
             }
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let items = json["data"] as? [[String: Any]] else { return .success([]) }
-            return .success(items.compactMap { $0["id"] as? String }.sorted())
+            return .success(items.compactMap { item in
+                guard let id = item["id"] as? String else { return nil }
+                return ModelEntry(id: id, modelType: item["model_type"] as? String)
+            }.sorted { $0.id < $1.id })
         } catch let failure as EndpointError {
             return .failure(failure)
         } catch {
@@ -163,19 +175,23 @@ public struct OpenAICompatClient: Sendable {
     /// failures surface as they are, and a second 400 surfaces too.
     public func transcribeDetailed(wav: Data, model: String) async throws -> Transcription {
         let url = try base.appendingPathComponent("audio/transcriptions")
+        // One limit for both uploads: the retry gets only what is left of the first.
+        let started = Date()
         let first = Self.uploadBody(wav: wav, model: model, language: settings.language,
                                     responseFormat: "verbose_json",
                                     boundary: "qs-\(UUID().uuidString)")
         do {
-            return try await upload(first.body, boundary: first.boundary, to: url)
+            return try await upload(first.body, boundary: first.boundary, to: url, limit: timeout)
         } catch let failure as EndpointError {
             guard failure == .serverError(400) else { throw failure }
             // The service will not take the field. Ask again the plain way,
             // and read its reply as one without a verdict.
+            let left = timeout - Date().timeIntervalSince(started)
+            guard left > 0 else { throw EndpointError.timedOut }
             let retry = Self.uploadBody(wav: wav, model: model, language: settings.language,
                                         responseFormat: nil,
                                         boundary: "qs-\(UUID().uuidString)")
-            let plain = try await upload(retry.body, boundary: retry.boundary, to: url)
+            let plain = try await upload(retry.body, boundary: retry.boundary, to: url, limit: left)
             return Transcription(text: plain.text, heardSpeech: true)
         }
     }
@@ -207,9 +223,10 @@ public struct OpenAICompatClient: Sendable {
 
     /// One upload, classified. Both the first try and the retry go through
     /// here, so a retry can never be made twice or on the wrong error.
-    private func upload(_ body: Data, boundary: String, to url: URL) async throws -> Transcription {
-        let req = request(to: url, method: "POST", body: body,
+    private func upload(_ body: Data, boundary: String, to url: URL, limit: TimeInterval) async throws -> Transcription {
+        var req = request(to: url, method: "POST", body: body,
                           contentType: "multipart/form-data; boundary=\(boundary)")
+        req.timeoutInterval = limit
         let data: Data
         do {
             let (d, response) = try await session.data(for: req)
