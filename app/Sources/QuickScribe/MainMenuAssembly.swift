@@ -3,8 +3,8 @@ import QuickScribeCore
 
 /// Everything the menu bar menu says, in one place that can be built and read
 /// without an app or a menu bar. The person's mode and the two model choices
-/// come in as plain values; the class turns them into the three submenus the
-/// owner approved.
+/// come in as plain values; the class turns them into the three submenus:
+/// Mode, Speech Model and Clean Up Model.
 @MainActor
 final class MainMenuAssembly: NSObject, NSMenuDelegate {
     /// What the menu is built from, read once when it opens. A value: a menu

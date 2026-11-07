@@ -2,13 +2,13 @@ import XCTest
 @testable import QuickScribeCore
 
 /// The menu's model lists: which of a service's models go to Speech, which to
-/// Clean Up, and which stay out of the menu. The first list is the owner's own
+/// Clean Up, and which stay out of the menu. The first list is a real local
 /// server, copied from its GET /models reply; the second is what a plain
 /// OpenAI-style server sends, with no model_type at all.
 final class ModelCatalogTests: XCTestCase {
 
-    /// The owner's 16 models exactly as that server lists them.
-    private let ownerServer: [ModelEntry] = [
+    /// 16 models exactly as a real local server lists them.
+    private let localServer: [ModelEntry] = [
         ModelEntry(id: "Muse-Glimmer-30B-oQ4e", modelType: "vlm"),
         ModelEntry(id: "Qwen3.8-27B-4bit", modelType: "vlm"),
         ModelEntry(id: "Qwen3.8-Flash-Next-oQ4e-mtp", modelType: "vlm"),
@@ -16,7 +16,7 @@ final class ModelCatalogTests: XCTestCase {
         ModelEntry(id: "Qwen3-Embedding-0.6B-4bit-DWQ", modelType: "embedding"),
         ModelEntry(id: "Qwen3-Reranker-0.6B-4bit", modelType: "reranker"),
         ModelEntry(id: "Qwen3.6-35B-A3B-4bit", modelType: "vlm"),
-        ModelEntry(id: "Qwen3.8-27B-Uncensored-MLX", modelType: "vlm"),
+        ModelEntry(id: "Llama-3.3-70B-Instruct-4bit", modelType: "vlm"),
         ModelEntry(id: "Qwen3.8-Flash-Next-UD-Q4_K_XL", modelType: "vlm"),
         ModelEntry(id: "clef-flash-oQ4e", modelType: "decision"),
         ModelEntry(id: "cohere-transcribe-03-2026-mlx-8bit", modelType: "audio_stt"),
@@ -27,8 +27,8 @@ final class ModelCatalogTests: XCTestCase {
         ModelEntry(id: "MarkItDown", modelType: "markitdown"),
     ]
 
-    func testTheOwnersServerSplitsExactlyAsTheBriefSays() {
-        let lists = ModelCatalog.split(ownerServer)
+    func testARealLocalServerSplitsAsExpected() {
+        let lists = ModelCatalog.split(localServer)
         XCTAssertEqual(Set(lists.speech), Set([
             "Qwen3-ASR-1.7B-8bit",
             "cohere-transcribe-03-2026-mlx-8bit",
@@ -47,7 +47,7 @@ final class ModelCatalogTests: XCTestCase {
             "Qwen3.8-27B-4bit",
             "Qwen3.8-Flash-Next-oQ4e-mtp",
             "Qwen3.6-35B-A3B-4bit",
-            "Qwen3.8-27B-Uncensored-MLX",
+            "Llama-3.3-70B-Instruct-4bit",
             "Qwen3.8-Flash-Next-UD-Q4_K_XL",
             "gemma-4-12B-it-oQ8e-mtp",
         ]))
@@ -59,7 +59,7 @@ final class ModelCatalogTests: XCTestCase {
     }
 
     func testTheOrderTheServiceGaveIsKept() {
-        let lists = ModelCatalog.split(ownerServer)
+        let lists = ModelCatalog.split(localServer)
         XCTAssertEqual(lists.speech, ["Qwen3-ASR-1.7B-8bit", "cohere-transcribe-03-2026-mlx-8bit",
                                       "granite-speech-4.1-2b-nar-mlx", "parakeet-tdt-0.6b-v3",
                                       "whisper-large-v3-8bit"],
@@ -108,7 +108,7 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(kind("whisper-1", "  "), .speech)
     }
 
-    func testEveryTypeTheOwnerSawIsCovered() {
+    func testEveryTypeARealServerSendsIsCovered() {
         for type in ["vlm", "audio_stt", "embedding", "reranker", "decision", "markitdown"] {
             let kind = ModelCatalog.kind(of: ModelEntry(id: "any-name", modelType: type))
             switch type {

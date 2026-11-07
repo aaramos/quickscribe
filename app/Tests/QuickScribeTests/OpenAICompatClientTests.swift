@@ -387,7 +387,7 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertEqual(entries.map(\.id), ["a-model", "b-model"])
     }
 
-    /// The owner's server sends a model_type per model; a plain server sends
+    /// A local server can send a model_type per model; a plain server sends
     /// none. Both must arrive, and the plain one must not gain a guess.
     func testModelTypesAreReadAndAnAbsentTypeStaysAbsent() async throws {
         service.queue(service.text(#"""

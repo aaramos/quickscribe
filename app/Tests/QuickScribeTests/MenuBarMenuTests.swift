@@ -89,7 +89,7 @@ final class MenuBarMenuTests: XCTestCase {
     /// A long model name is cut in the title so the menu stays a sane width, and
     /// the full name is still inside the submenu.
     func testALongNameIsCutInTheTitleButKeptInTheSubmenu() async {
-        let long = "Qwen3.8-Flash-Next-Uncensored-8bit-Extra-Long-Model-Name"
+        let long = "Qwen3.8-Flash-Next-Multimodal-8bit-Extra-Long-Model-Name"
         XCTAssertTrue(long.count > MainMenuBuilder.titleNameLimit)
         let title = MainMenuBuilder.title(MainMenuBuilder.cleanupLabel, long)
         XCTAssertTrue(title.hasPrefix("Clean Up Model: "), title)
