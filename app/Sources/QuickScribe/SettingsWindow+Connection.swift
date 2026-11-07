@@ -28,11 +28,12 @@ extension SettingsWindow {
 
     private func connectionChanged(saveKey: Bool = false) {
         let before = endpointStore.load()
-        // The stored key as it was. A key edit must be judged by what the store
-        // holds before and after, never by the field it was just written from:
-        // that comparison is always equal, so a new key was never noticed, and
-        // the model fetch kept using none until the app restarted.
-        let keyBefore = endpointStore.apiKey()
+        // The stored key, read only when a key was actually edited: an address
+        // edit has no business opening the Keychain. A key edit is judged by
+        // what the store held before and after, never by the field it was just
+        // written from (that comparison is always equal, so a new key went
+        // unnoticed until the app restarted).
+        let keyBefore = saveKey ? endpointStore.apiKey() : nil
         let s = collectConnection()
         endpointStore.save(s)
         if saveKey {
@@ -43,7 +44,7 @@ extension SettingsWindow {
             }
         }
         let addressChanged = before.normalizedAddress != s.normalizedAddress
-        let keyNow = endpointStore.apiKey()
+        let keyNow = saveKey ? endpointStore.apiKey() : nil
         let keyChanged = saveKey && keyNow != keyBefore
         refreshWordsOutWarning()
         // The prompt editor shows the factory of the route cleanup now uses.
@@ -54,7 +55,7 @@ extension SettingsWindow {
     }
 
     /// When words will leave the Mac for a non-local address, the screen says so.
-    private func refreshWordsOutWarning() {
+    func refreshWordsOutWarning() {
         let s = collectConnection()
         if let problem = s.addressProblem {
             wordsOutLabel.stringValue = problem

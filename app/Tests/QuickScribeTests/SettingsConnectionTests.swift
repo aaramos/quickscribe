@@ -245,6 +245,119 @@ final class SettingsConnectionTests: XCTestCase {
                        "the page re-reads the saved values without losing the address")
     }
 
+    /// AA2: a menu choice must not touch typed-but-uncommitted fields, and
+    /// must never read the key.
+    func testAMenuChoiceKeepsTypedAddressAndKeyAndReadsNoKey() throws {
+        final class Counter: SecretStoring, @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: String?
+            private var reads = 0
+            init(_ v: String?) { value = v }
+            func secret() -> String? { lock.lock(); reads += 1; let v = value; lock.unlock(); return v }
+            func setSecret(_ v: String?) throws { lock.lock(); value = v; lock.unlock() }
+            var readCount: Int { lock.lock(); defer { lock.unlock() }; return reads }
+        }
+        let counter = Counter("sk-saved")
+        let store = EndpointSettingsStore(defaults: defaults, secrets: counter)
+        var saved = EndpointSettings(address: "https://saved.example/v1", useCustomSpeech: false,
+                                     useCustomCleanup: false)
+        saved.language = EndpointSettings.deviceLanguage
+        store.save(saved)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
+        let window = SettingsWindow(library: PromptLibrary(fileURL: url), endpointStore: store)
+        window.show()
+        defer { window.window?.close() }
+        let root = try XCTUnwrap(window.window?.contentView)
+        let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
+        let key = try XCTUnwrap(all(NSSecureTextField.self, in: root).first)
+
+        // Typed, not committed: exactly what the review said was thrown away.
+        address.stringValue = "https://typed-not-committed.example/v1"
+        key.stringValue = "sk-typed-not-committed"
+        let readsBefore = counter.readCount
+        window.connectionChangedOutside()
+        XCTAssertEqual(address.stringValue, "https://typed-not-committed.example/v1",
+                       "a menu choice must not put the saved address back over typed text")
+        XCTAssertEqual(key.stringValue, "sk-typed-not-committed",
+                       "nor discard a typed key")
+        XCTAssertEqual(counter.readCount, readsBefore, "a menu choice reads no key")
+        XCTAssertEqual(store.load().address, "https://saved.example/v1", "and saves nothing")
+    }
+
+    /// AA2: what a menu choice DO change. The words-out warning follows the
+    /// route, and a clean editor shows that route's factory text; a dirty
+    /// draft is left exactly as typed.
+    func testAMenuChoiceUpdatesTheWarningAndTheEditorButKeepsDirtyDrafts() throws {
+        addressField.stringValue = "https://some-service.example"
+        commit(addressField)
+        XCTAssertFalse(all(NSTextField.self, in: root).contains { $0.stringValue.contains("leave this Mac") })
+
+        // The menu bar now puts cleanup on a service model.
+        var s = endpointStore().load()
+        s.useCustomCleanup = true
+        s.cleanupModel = "tidy-y"
+        endpointStore().save(s)
+        settings.connectionChangedOutside()
+
+        XCTAssertTrue(all(NSTextField.self, in: root).contains { $0.stringValue.contains("leave this Mac") },
+                      "the words-out warning must follow the route")
+        XCTAssertTrue(all(NSTextView.self, in: root).contains { $0.string == ServicePrompts.polish },
+                      "a clean editor now shows the service route's factory text, the half the old refresh missed")
+        XCTAssertFalse(all(NSTextView.self, in: root).contains { $0.string == FactoryPrompts.polish },
+                       "and no longer Apple's")
+
+        // A dirty draft, though, is the person's own and stays untouched.
+        let editable = all(NSTextView.self, in: root).filter { $0.isEditable && $0.isRichText == false }
+        let editor = try XCTUnwrap(editable.max { $0.string.count < $1.string.count } ?? editable.first)
+        editor.string = "My unsaved words."
+        editor.delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: editor))
+        var again = endpointStore().load()
+        again.useCustomCleanup = false          // back to Apple, then to the service again
+        endpointStore().save(again)
+        settings.connectionChangedOutside()
+        again.useCustomCleanup = true
+        endpointStore().save(again)
+        settings.connectionChangedOutside()
+        XCTAssertEqual(editor.string, "My unsaved words.", "a dirty draft stays exactly as typed")
+    }
+
+    /// AA2/AA3: an address edit alone opens the Keychain zero times.
+    func testAnAddressEditAloneReadsTheKeyZeroTimes() throws {
+        final class Counter: SecretStoring, @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: String?
+            private var reads = 0
+            init(_ v: String?) { value = v }
+            func secret() -> String? { lock.lock(); reads += 1; let v = value; lock.unlock(); return v }
+            func setSecret(_ v: String?) throws { lock.lock(); value = v; lock.unlock() }
+            var readCount: Int { lock.lock(); defer { lock.unlock() }; return reads }
+        }
+        let counter = Counter("sk-saved")
+        let store = EndpointSettingsStore(defaults: defaults, secrets: counter)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
+        let window = SettingsWindow(library: PromptLibrary(fileURL: url), endpointStore: store)
+        window.show()
+        defer { window.window?.close() }
+        let root = try XCTUnwrap(window.window?.contentView)
+        let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
+        let readsBefore = counter.readCount
+        var reported: [(Bool, Bool)] = []
+        window.onConnectionChanged = { reported.append(($0, $1)) }
+        address.stringValue = "https://another.example/v1"
+        address.sendAction(address.action!, to: address.target)
+        XCTAssertEqual(counter.readCount, readsBefore, "an address edit must not read the key")
+        XCTAssertEqual(reported.last?.0, true, "the address change is still reported")
+        XCTAssertEqual(reported.last?.1, false, "and no key change is claimed")
+
+        // A key edit still reads, and still reports the change.
+        let key = try XCTUnwrap(all(NSSecureTextField.self, in: root).first)
+        let beforeKeyEdit = counter.readCount
+        key.stringValue = "sk-new"
+        key.sendAction(key.action!, to: key.target)
+        XCTAssertGreaterThan(counter.readCount, beforeKeyEdit, "a key edit reads it to compare")
+        XCTAssertEqual(reported.last?.1, true, "and reports the change")
+    }
+
     func testNonLocalAddressShowsTheLeavingWarning() throws {
         var s = endpointStore().load()
         s.useCustomSpeech = true                 // what the menu would set

@@ -41,12 +41,16 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         super.init()
     }
 
-    /// A choice made in the menu bar changes which routes send words out, so
-    /// an open Settings page re-reads its controls and its warning. Without
-    /// this the "Your words will leave this Mac" line could be stale.
+    /// A choice made in the menu bar changes which routes send words out, so an
+    /// open Settings page refreshes what that changes: the words-out warning,
+    /// and the prompt editor, which shows the factory of the route cleanup now
+    /// uses. It deliberately does NOT touch the address or key fields (typed but
+    /// uncommitted text must survive) and never reads the key: a menu choice is
+    /// no reason to open the Keychain.
     func connectionChangedOutside() {
         guard window != nil else { return }
-        reloadConnection()
+        refreshWordsOutWarning()
+        showCurrentMode()
     }
 
     func show() {

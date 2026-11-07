@@ -323,10 +323,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menuDidClose: { [weak self] in
                 guard let self else { return }
                 self.menuIsOpen = false
-                if self.rebuildAfterClose {
-                    self.rebuildAfterClose = false
-                    self.rebuildMenu()
-                }
+                guard self.rebuildAfterClose else { return }
+                self.rebuildAfterClose = false
+                self.rebuildMenu()
             })
     }
 
