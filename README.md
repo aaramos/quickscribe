@@ -52,7 +52,9 @@ you choose. Coming from version 1.0, the old app is named QuickScribe Native, no
 QuickScribe: after installing this version, quit QuickScribe Native and drag it to the
 Trash, or you will have both apps. After an update macOS may ask for Microphone and Accessibility again; switch
 them back on if the hotkeys go quiet. If a switch already looks on but the hotkeys are
-dead, remove QuickScribe from that list with the minus button and add it again. Your settings and edited prompts survive the update. Releases carry one steady self-made signature, so an update is the same app to macOS; coming from v1.0, which had a throwaway signature, means granting permissions again once, whatever the signature.
+dead, remove QuickScribe from that list with the minus button and add it again. Your settings and edited prompts survive the update. Releases carry one steady self-made signature, so an update is the same app to macOS; coming from v1.0, which had a throwaway signature, means granting permissions again once, whatever the signature. If you saved an API key,
+macOS may ask for your password after an update so QuickScribe can read it: choose
+Always Allow.
 
 ## Your own service (optional)
 

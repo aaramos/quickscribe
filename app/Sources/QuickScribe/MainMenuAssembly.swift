@@ -230,8 +230,6 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
 
     // MARK: - Menu delegate
 
-    /// The menu just opened: ask for a fresh list in the background. The menu on
-    /// screen is the one already built and is not touched.
     /// The menu the person is actually looking at. Remembered when it opens,
     /// because a rebuild while it is open installs a NEW menu as the status
     /// item's menu, and the close then arrives for the old one. Comparing a
@@ -239,6 +237,8 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
     /// app believing a menu is still open, so a landed refresh would not show.
     private(set) var openMenu: NSMenu?
 
+    /// The menu just opened: ask for a fresh list in the background. The menu on
+    /// screen is the one already built and is not touched.
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === builtMenu else { return }
         openMenu = menu

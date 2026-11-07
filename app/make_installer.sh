@@ -51,7 +51,8 @@ so an update is the same app to macOS. macOS may still ask for Microphone and Ac
 switch them back on if the hotkeys stop working. If a switch already looks on but the
 hotkeys are dead, remove ${APP_NAME} from that list with the minus button and add it
 again. Coming from version 1.0, which had a throwaway signature, expect to
-grant permissions once more whatever you do.
+grant permissions once more whatever you do. If you saved an API key, macOS may ask
+for your password after an update so ${APP_NAME} can read it: choose Always Allow.
 
 Your words stay on this Mac unless you set an address in Settings > Inference server.
 With an address, the routes you switch in the menu bar (speech, cleanup, or both) go to
