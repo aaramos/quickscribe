@@ -98,24 +98,10 @@ public struct OpenAICompatClient: Sendable {
 
     // MARK: - GET /models
 
-    public func listModels() async -> [String] {
-        // Used to fill pickers; a service that does not list models is fine,
-        // the person types names instead. Failures read as an empty list.
-        if case .success(let entries) = await fetchModels() { return entries.map(\.id) }
-        return []
-    }
-
-    /// Same call, but reports why it failed. Test Connection uses this so a
-    /// refused key reads differently from an address that never answered.
-    public func checkModels() async -> Result<[String], EndpointError> {
-        switch await fetchModels() {
-        case .success(let entries): return .success(entries.map(\.id))
-        case .failure(let error): return .failure(error)
-        }
-    }
-
     /// The service's models, with the type it names for each one. Alphabetical
-    /// by id, as every caller has always seen them.
+    /// by id, as every caller has always seen them. Reports why it failed, so a
+    /// refused key reads differently from an address that never answered. A
+    /// service that lists nothing is not an error.
     public func fetchModels() async -> Result<[ModelEntry], EndpointError> {
         do {
             let url = try base.appendingPathComponent("models")

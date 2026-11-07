@@ -37,8 +37,9 @@ final class LiveEndpointCheckTests: XCTestCase {
         let client = OpenAICompatClient(settings: settings, apiKey: live.key, timeout: 120)
 
         // 1. Models list (cheap, does not wake a model).
-        switch await client.checkModels() {
-        case .success(let ids):
+        switch await client.fetchModels() {
+        case .success(let entries):
+            let ids = entries.map(\.id)
             XCTAssertFalse(ids.isEmpty, "the live server lists no models")
             XCTAssertTrue(ids.contains(audioModel), "\(audioModel) is not offered")
             XCTAssertTrue(ids.contains(cleanupModel), "\(cleanupModel) is not offered")

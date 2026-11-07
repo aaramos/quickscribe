@@ -383,8 +383,8 @@ final class OpenAICompatClientTests: XCTestCase {
 
     func testModelListFromAFriendlyService() async throws {
         service.queue(service.text(#"{"data":[{"id":"b-model"},{"id":"a-model"},{"nodata":1}]}"#), forPath: "/v1/models")
-        let ids = await client.listModels()
-        XCTAssertEqual(ids, ["a-model", "b-model"])
+        guard case .success(let entries) = await client.fetchModels() else { return XCTFail("fetch failed") }
+        XCTAssertEqual(entries.map(\.id), ["a-model", "b-model"])
     }
 
     /// The owner's server sends a model_type per model; a plain server sends
@@ -405,16 +405,16 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertNil(entries.first { $0.id == "gpt-4o" }?.modelType,
                      "a service that sends no type must not be given one here")
 
-        // The plain helper still answers ids only, for every older caller.
+        // A plain server's list arrives the same way, sorted by id.
         service.queue(service.text(#"{"data":[{"id":"b"},{"id":"a"}]}"#), forPath: "/v1/models")
-        let ids = await client.listModels()
-        XCTAssertEqual(ids, ["a", "b"])
+        guard case .success(let plainEntries) = await client.fetchModels() else { return XCTFail("fetch failed") }
+        XCTAssertEqual(plainEntries.map(\.id), ["a", "b"])
     }
 
-    func testModelListEmptyOnFailureIsEmptyNotNull() async {
+    func testModelListFailureIsAFailureNotAnEmptyList() async {
         service.queue(service.text("{}", status: 500), forPath: "/v1/models")
-        let ids = await client.listModels()
-        XCTAssertTrue(ids.isEmpty)
+        guard case .failure(let error) = await client.fetchModels() else { return XCTFail("500 must not read as an empty list") }
+        XCTAssertEqual(error, .serverError(500))
     }
 
     // MARK: - Address rules
