@@ -79,6 +79,20 @@ final class InsertionTargetTests: XCTestCase {
         XCTAssertEqual(InsertionTarget.classify(role: "AXWebArea", hasTextCursor: false), .unsure)
         XCTAssertEqual(InsertionTarget.classify(role: nil, hasTextCursor: false), .unsure)
     }
+    func testTheAccessibilityNoticeFitsThePillAndSaysWhatToDo() {
+        // The sentence AppDelegate shows when Accessibility is not in effect.
+        // It must fit the pill in the real font, so the end is never cut off,
+        // and it must name the remove-and-add-again step.
+        let sentence = AppDelegate.accessibilityOffNotice
+        let text = NSAttributedString(string: sentence, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .medium),
+        ])
+        XCTAssertLessThanOrEqual(text.size().width, OverlayController.messageTextBudget,
+                                 "the Accessibility notice is cut off at the end on the pill")
+        XCTAssertTrue(sentence.contains("remove it and add it again"))
+        XCTAssertFalse(sentence.contains("—"), "no em dashes in on-screen text")
+    }
+
     func testTheUpdateNoticeFitsThePill() {
         // The sentence AppDelegate shows when GitHub says a release is newer.
         // If that wording changes, this test's string must change with it.

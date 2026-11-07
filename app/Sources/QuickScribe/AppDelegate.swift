@@ -170,7 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildMenu()
             return
         }
-        overlayWarn("Accessibility off, so hotkeys are disabled. Enable \(AppInfo.displayName) in System Settings.")
+        overlayWarn(AppDelegate.accessibilityOffNotice)
         openAccessibilityPaneOnce()
         NSLog("QuickScribe: waiting timer started (checks every 2 s)")
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
@@ -206,6 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(url)
         }
     }
+
+    /// Shown when Accessibility is not in effect. The switch can look on while
+    /// it does not apply (an older build with the same app id), so the sentence
+    /// also says what to do when it already looks on. Pinned by a pill-fit test.
+    static let accessibilityOffNotice = "Hotkeys are off. If QuickScribe already looks on in Settings, remove it and add it again."
 
     private func overlayWarn(_ msg: String, autoHideAfter: TimeInterval? = nil) {
         session.showOverlay(.error(msg), autoHide: autoHideAfter)
