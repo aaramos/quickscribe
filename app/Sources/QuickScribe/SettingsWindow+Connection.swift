@@ -8,31 +8,27 @@ import QuickScribeCore
 @MainActor
 extension SettingsWindow {
 
-    // MARK: - Custom service
+    // MARK: - Inference server
 
     func reloadConnection() {
         let s = endpointStore.load()
         addressField.stringValue = s.address
         keyField.stringValue = endpointStore.apiKey() ?? ""
-        speechChoice.selectItem(at: s.useCustomSpeech ? 1 : 0)
-        cleanupChoice.selectItem(at: s.useCustomCleanup ? 1 : 0)
-        speechModelField.stringValue = s.speechModel
-        cleanupModelField.stringValue = s.cleanupModel
         refreshWordsOutWarning()
-        if s.isEnabled { fetchModels() }
     }
 
-    /// Reads every control back into a settings value. The person's typed model
-    /// names survive whatever the list fetch does.
+    /// Reads every control back into a settings value. The model choices are
+    /// not on this page any more: they belong to the menu bar, and the saved
+    /// ones are carried through untouched.
     private func collectConnection() -> EndpointSettings {
-        EndpointSettings(address: addressField.stringValue,
-                         speechModel: speechModelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-                         cleanupModel: cleanupModelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-                         useCustomSpeech: speechChoice.indexOfSelectedItem == 1,
-                         useCustomCleanup: cleanupChoice.indexOfSelectedItem == 1)
+        var s = endpointStore.load()
+        s.address = addressField.stringValue
+        return s
     }
 
     private func connectionChanged(saveKey: Bool = false) {
+        let before = endpointStore.load()
+        let hadKey = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : keyField.stringValue
         let s = collectConnection()
         endpointStore.save(s)
         if saveKey {
@@ -42,11 +38,14 @@ extension SettingsWindow {
                 connectionStatus.stringValue = error.localizedDescription
             }
         }
+        let addressChanged = before.normalizedAddress != s.normalizedAddress
+        let keyChanged = saveKey && (endpointStore.apiKey() != nil) != (hadKey != nil)
         refreshWordsOutWarning()
         // The prompt editor shows the factory of the route cleanup now uses.
         // Unsaved typing stays put (showCurrentMode keeps dirty drafts).
         showCurrentMode()
-        if s.isEnabled { fetchModels() } else { connectionStatus.stringValue = "" }
+        if !s.isEnabled { connectionStatus.stringValue = "" }
+        onConnectionChanged?(addressChanged, keyChanged)
     }
 
     /// When words will leave the Mac for a non-local address, the screen says so.
@@ -67,28 +66,6 @@ extension SettingsWindow {
         }
     }
 
-    /// Fills the model pickers from GET /models. Services that do not list
-    /// models are fine: the fields stay typed by hand.
-    private func fetchModels() {
-        modelsFetchGeneration += 1
-        let generation = modelsFetchGeneration
-        let s = collectConnection()
-        let client = OpenAICompatClient(settings: s, apiKey: endpointStore.apiKey(), timeout: 8)
-        Task { [weak self] in
-            let models = await client.listModels()
-            guard let self, generation == self.modelsFetchGeneration, !models.isEmpty else { return }
-            self.fill(speechModelField, with: models)
-            self.fill(self.cleanupModelField, with: models)
-        }
-    }
-
-    private func fill(_ box: NSComboBox, with models: [String]) {
-        let typed = box.stringValue
-        box.removeAllItems()
-        box.addItems(withObjectValues: models)
-        box.stringValue = typed
-    }
-
     // MARK: - Connection actions
 
     @objc func connectionFieldEndedEditing(_ sender: NSTextField) {
@@ -97,13 +74,9 @@ extension SettingsWindow {
 
     func controlTextDidEndEditing(_ notification: Notification) {
         if let field = notification.object as? NSTextField,
-           field === addressField || field === keyField || field === speechModelField || field === cleanupModelField {
+           field === addressField || field === keyField {
             connectionFieldEndedEditing(field)
         }
-    }
-
-    @objc func connectionChoiceChanged() {
-        connectionChanged()
     }
 
     @objc func testConnectionTapped() {
@@ -129,19 +102,18 @@ extension SettingsWindow {
             return problem
         }
         guard settings.isEnabled else {
-            return "No address set, so everything runs on Apple's own models on this Mac."
+            return "No address set, so everything uses Apple Native."
         }
         // A server may load the model on its first call; the original app
         // allowed 120 s for that, so this must not read a slow load as failure.
         let client = OpenAICompatClient(settings: settings, apiKey: apiKey, timeout: 120)
         var reached = false, keyOK = false
-        switch await client.checkModels() {
-        case .success(let models):
+        switch await client.fetchModels() {
+        case .success(let entries):
             reached = true
             keyOK = true
-            lines.append(models.isEmpty
-                ? "Reached the address, but it does not list models. You can still type the names."
-                : "Reached the address. It has \(models.count) model\(models.count == 1 ? "" : "s").")
+            let lists = ModelCatalog.split(entries)
+            lines.append(Self.modelsLine(lists))
         case .failure(let error):
             if case .unauthorized = error {
                 reached = true
@@ -156,35 +128,49 @@ extension SettingsWindow {
         if !keyOK { return lines.joined(separator: "\n") }
         if settings.useCustomSpeech {
             if settings.speechModel.isEmpty {
-                lines.append("Speech: no model name typed yet.")
+                lines.append("Speech: no model chosen in the menu bar yet.")
             } else {
                 do {
                     _ = try await client.transcribe(wav: silenceWAV(), model: settings.speechModel)
-                    lines.append("Speech works.")
+                    lines.append("Speech works with \(settings.speechModel).")
                 } catch {
                     lines.append("Speech: \((error as? EndpointError)?.message ?? error.localizedDescription)")
                 }
             }
         } else {
-            lines.append("Speech: Apple's on-device model is chosen, not the service.")
+            lines.append("Speech: Apple Native is chosen in the menu bar.")
         }
         if settings.useCustomCleanup {
             if settings.cleanupModel.isEmpty {
-                lines.append("Cleanup: no model name typed yet.")
+                lines.append("Clean up: no model chosen in the menu bar yet.")
             } else {
                 do {
                     _ = try await client.clean(text: "The connection test is a plain sentence.",
                                                model: settings.cleanupModel,
                                                systemPrompt: "Repeat the sentence back exactly.")
-                    lines.append("Cleanup works.")
+                    lines.append("Clean up works with \(settings.cleanupModel).")
                 } catch {
-                    lines.append("Cleanup: \((error as? EndpointError)?.message ?? error.localizedDescription)")
+                    lines.append("Clean up: \((error as? EndpointError)?.message ?? error.localizedDescription)")
                 }
             }
         } else {
-            lines.append("Cleanup: Apple's on-device model is chosen, not the service.")
+            lines.append("Clean up: Apple Native is chosen in the menu bar.")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// The one line Test Connection adds about what a service offers, split the
+    /// way the menu splits it: "Connected. 5 speech, 7 clean up models."
+    nonisolated static func modelsLine(_ lists: ModelCatalog.Lists) -> String {
+        let speech = lists.speech.count, cleanup = lists.cleanup.count
+        guard speech + cleanup > 0 else {
+            return "Reached the address, but it lists no speech or clean up models."
+        }
+        func noun(_ n: Int, _ singular: String, _ plural: String) -> String {
+            "\(n) \(n == 1 ? singular : plural)"
+        }
+        return "Connected. " + noun(speech, "speech", "speech") + ", "
+            + noun(cleanup, "clean up model", "clean up models") + "."
     }
 
     /// A short silence as 16 kHz mono 16-bit PCM in a WAV container. Test

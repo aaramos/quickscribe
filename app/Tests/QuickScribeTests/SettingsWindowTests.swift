@@ -80,17 +80,17 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertEqual(seen.last?.route, .apple)
         XCTAssertEqual(seen.last?.prompt, FactoryPrompts.polish)
 
-        // Cleanup switched to Custom: the test follows the route and its
-        // longer factory set, even though the editor never changed. An
-        // address must be set first: Custom without one stays Apple.
+        // Cleanup switched to a service model, which the menu bar now sets and
+        // settings keeps: the test follows the route and its longer factory
+        // set, even though the editor never changed. An address must be set
+        // first: a service without one stays Apple.
         let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
         address.stringValue = "http://127.0.0.1:1234/v1"
         address.sendAction(address.action!, to: address.target)
-        let popups = all(NSPopUpButton.self, in: root)
-        XCTAssertEqual(popups.count, 2, "expected speech and cleanup pickers only")
-        let cleanup = popups[1]
-        cleanup.selectItem(at: 1)
-        cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        var s = settings.endpointStore.load()
+        s.useCustomCleanup = true
+        s.cleanupModel = "tidy-y"
+        settings.endpointStore.save(s)
         try await run()
         XCTAssertEqual(seen.last?.route, .service)
         XCTAssertEqual(seen.last?.prompt, ServicePrompts.polish,
@@ -100,11 +100,12 @@ final class SettingsWindowTests: XCTestCase {
         editor.string = "My own words."
         editor.delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: editor))
         button("Save", root).performClick(nil)
-        for pick in [0, 1] {
-            cleanup.selectItem(at: pick)
-            cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        for service in [false, true] {
+            var s = settings.endpointStore.load()
+            s.useCustomCleanup = service
+            settings.endpointStore.save(s)
             try await run()
-            XCTAssertEqual(seen.last?.route, pick == 0 ? .apple : .service)
+            XCTAssertEqual(seen.last?.route, service ? .service : .apple)
             XCTAssertEqual(seen.last?.prompt, "My own words.")
         }
     }
@@ -120,26 +121,27 @@ final class SettingsWindowTests: XCTestCase {
         let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
         address.stringValue = "http://127.0.0.1:1234/v1"
         address.sendAction(address.action!, to: address.target)
-        let cleanup = all(NSPopUpButton.self, in: root)[1]
-        func choose(_ item: Int) {
-            cleanup.selectItem(at: item)
-            cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        func choose(_ service: Bool) {
+            var s = settings.endpointStore.load()
+            s.useCustomCleanup = service
+            settings.endpointStore.save(s)
+            settings.showCurrentMode()
         }
         func type(_ text: String) {
             editor.string = text
             editor.delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: editor))
         }
 
-        choose(1)   // Custom cleanup
+        choose(true)   // a service cleanup model
         XCTAssertEqual(editor.string, ServicePrompts.polish, "the editor shows the route that runs")
 
         type("Mine.")
-        choose(0)
+        choose(false)
         XCTAssertEqual(editor.string, "Mine.", "unsaved typing survives a route flip")
 
         button("Save", root).performClick(nil)
-        choose(0); XCTAssertEqual(editor.string, "Mine.")
-        choose(1); XCTAssertEqual(editor.string, "Mine.", "a custom prompt is the person's own on both routes")
+        choose(false); XCTAssertEqual(editor.string, "Mine.")
+        choose(true); XCTAssertEqual(editor.string, "Mine.", "a custom prompt is the person's own on both routes")
 
         button("Reset to Default", root).performClick(nil)
         XCTAssertEqual(editor.string, ServicePrompts.polish, "reset returns the CURRENT route's factory")
@@ -188,9 +190,10 @@ final class SettingsWindowTests: XCTestCase {
         let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
         address.stringValue = "http://127.0.0.1:1234/v1"
         address.sendAction(address.action!, to: address.target)
-        let cleanup = all(NSPopUpButton.self, in: root)[1]
-        cleanup.selectItem(at: 1)
-        cleanup.sendAction(cleanup.action!, to: cleanup.target)
+        var s = settings.endpointStore.load()
+        s.useCustomCleanup = true
+        s.cleanupModel = "tidy-y"
+        settings.endpointStore.save(s)
         let before = secrets.reads
         try await run()
         XCTAssertEqual(secrets.reads, before + 1, "one read, exactly when the service answers")

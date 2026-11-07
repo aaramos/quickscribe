@@ -3,9 +3,10 @@ import XCTest
 @testable import QuickScribe
 import QuickScribeCore
 
-/// Drives the real Settings window's Custom service section: fields persist,
-/// the key lands in the secret store only, choices and warnings react, and
-/// Test Connection reports all four checks against a fake service.
+/// Drives the real Settings window's Inference server section: fields persist,
+/// the key lands in the secret store only, the warning reacts, and Test
+/// Connection reports what the service offers. Model choice itself lives in the
+/// menu bar, so there are no model controls on this page any more.
 @MainActor
 final class SettingsConnectionTests: XCTestCase {
     private var service: FakeService!
@@ -22,7 +23,11 @@ final class SettingsConnectionTests: XCTestCase {
     override func setUpWithError() throws {
         service = try FakeService()
         try service.start()
-        service.queue(FakeService.Rule(body: Data(#"{"data":[{"id":"whisper-x"},{"id":"tidy-y"}]}"#.utf8)), forPath: "/v1/models")
+        service.queue(FakeService.Rule(body: Data(#"""
+        {"data":[{"id":"whisper-x","model_type":"audio_stt"},
+                 {"id":"tidy-y","model_type":"llm"},
+                 {"id":"embed-z","model_type":"embedding"}]}
+        """#.utf8)), forPath: "/v1/models")
         suiteName = "qs-settings-conn-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         secrets = MemorySecrets.Store()
@@ -42,27 +47,42 @@ final class SettingsConnectionTests: XCTestCase {
     private var root: NSView { settings.window!.contentView! }
     private var addressField: NSTextField { all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" }! }
     private var keyField: NSTextField { all(NSSecureTextField.self, in: root).first! }
-    private var combos: [NSComboBox] { all(NSComboBox.self, in: root) }   // speech, cleanup
-    private var popups: [NSPopUpButton] { all(NSPopUpButton.self, in: root) }   // speech, cleanup
     private var testButton: NSButton { all(NSButton.self, in: root).first { $0.title == "Test Connection" }! }
 
     private func commit(_ control: NSControl) {
         control.sendAction(control.action!, to: control.target)
     }
 
-    func testAddressAndModelsPersistAndPickersFill() async throws {
+    /// No model controls on this page: the three submenus in the menu bar own
+    /// that choice now.
+    func testThePageHasNoSpeechOrCleanupModelControls() {
+        XCTAssertTrue(all(NSPopUpButton.self, in: root).isEmpty, "the Speech and Cleanup pickers are gone")
+        XCTAssertTrue(all(NSComboBox.self, in: root).isEmpty, "the model name boxes are gone")
+        XCTAssertTrue(all(NSTextField.self, in: root).contains { $0.stringValue == "Inference server" },
+                      "the section is named Inference server")
+        XCTAssertFalse(all(NSTextField.self, in: root).contains { $0.stringValue == "Custom service" })
+        XCTAssertTrue(all(NSTextField.self, in: root).contains {
+            $0.stringValue.contains("Leave the address empty to use Apple Native only. Choose your models from the menu bar icon.")
+        }, "the line that says where models are chosen")
+    }
+
+    func testAddressPersistsAndTheChangeIsAnnounced() throws {
+        var announced: [(Bool, Bool)] = []
+        settings.onConnectionChanged = { announced.append(($0, $1)) }
         addressField.stringValue = service.baseURL
         commit(addressField)
-        try await Task.sleep(nanoseconds: 400_000_000)   // let GET /models land
         XCTAssertEqual(defaults.string(forKey: "endpoint.address"), service.baseURL)
-        XCTAssertTrue(combos[0].objectValues as? [String] == ["tidy-y", "whisper-x"],
-                      "both pickers fill from the service: \(combos[0].objectValues ?? [])")
-        // Custom choices persist through the controls.
-        popups[0].selectItem(at: 1)
-        commit(popups[0])
-        let store = EndpointSettingsStore(defaults: defaults, secrets: secrets)
-        XCTAssertTrue(store.load().speechUsesEndpoint)
-        XCTAssertFalse(store.load().cleanupUsesEndpoint)
+        XCTAssertEqual(announced.count, 1)
+        XCTAssertEqual(announced.first?.0, true, "the address really changed, so the old model list is dropped")
+    }
+
+    func testSavingAnUnchangedAddressIsNotAChange() throws {
+        addressField.stringValue = service.baseURL
+        commit(addressField)
+        var announced: [(Bool, Bool)] = []
+        settings.onConnectionChanged = { announced.append(($0, $1)) }
+        commit(addressField)                     // same address again
+        XCTAssertEqual(announced.first?.0, false, "no new address, so the list is not thrown away")
     }
 
     func testKeyGoesToSecretStoreNotPreferences() throws {
@@ -85,19 +105,33 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertNil(secrets.secret())
     }
 
-    func testTypedModelSurvivesTheModelListArriving() async throws {
-        addressField.stringValue = service.baseURL
+    /// The choices the earlier 2.0 builds saved are carried through: this page
+    /// no longer sets them, and saving the address must not wipe them.
+    func testModelChoicesSavedByAnEarlierBuildSurvive() throws {
+        var saved = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "whisper-x",
+                                     cleanupModel: "tidy-y", useCustomSpeech: true, useCustomCleanup: true)
+        saved.language = EndpointSettings.deviceLanguage
+        let store = EndpointSettingsStore(defaults: defaults, secrets: secrets)
+        store.save(saved)
+        settings.window?.close()
+        settings = SettingsWindow(library: library, endpointStore: store)
+        settings.show()
+        addressField.stringValue = "http://127.0.0.1:1234/v1"
         commit(addressField)
-        combos[1].stringValue = "my-own-model"
-        commit(combos[1])
-        try await Task.sleep(nanoseconds: 500_000_000)
-        XCTAssertEqual(combos[1].stringValue, "my-own-model", "the fetch must not wipe a typed name")
-        XCTAssertEqual(defaults.string(forKey: "endpoint.cleanupModel"), "my-own-model")
+        let after = store.load()
+        XCTAssertEqual(after.speechModel, "whisper-x", "a saved speech model is not lost by touching the address")
+        XCTAssertEqual(after.cleanupModel, "tidy-y")
+        XCTAssertTrue(after.useCustomSpeech)
+        XCTAssertTrue(after.useCustomCleanup)
     }
 
     func testNonLocalAddressShowsTheLeavingWarning() throws {
-        popups[0].selectItem(at: 1)          // Speech set to Custom: words really do leave
-        commit(popups[0])
+        var s = endpointStore().load()
+        s.useCustomSpeech = true                 // what the menu would set
+        endpointStore().save(s)
+        settings.window?.close()
+        settings = SettingsWindow(library: library, endpointStore: endpointStore())
+        settings.show()
         addressField.stringValue = "https://some-service.example"
         commit(addressField)
         let warning = all(NSTextField.self, in: root).first { $0.stringValue.contains("leave this Mac") }
@@ -128,7 +162,11 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertFalse(EndpointSettingsStore(defaults: defaults, secrets: secrets).load().isEnabled)
     }
 
-    func testConnectionTestReportsFourChecks() async throws {
+    private func endpointStore() -> EndpointSettingsStore {
+        EndpointSettingsStore(defaults: defaults, secrets: secrets)
+    }
+
+    func testConnectionTestReportsWhatTheServiceOffers() async throws {
         service.queue(FakeService.Rule(body: Data(#"{"text":""}"#.utf8)), forPath: "/v1/audio/transcriptions")
         service.queue(FakeService.Rule(body: Data(
             "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".utf8
@@ -137,11 +175,22 @@ final class SettingsConnectionTests: XCTestCase {
         s.useCustomSpeech = true
         s.useCustomCleanup = true
         let report = await SettingsWindow.runConnectionTest(settings: s, apiKey: "k")
-        XCTAssertTrue(report.contains("Reached the address"), report)
-        XCTAssertTrue(report.contains("2 models"), report)
+        XCTAssertTrue(report.contains("Connected. 1 speech, 1 clean up model."), report)
         XCTAssertTrue(report.contains("Key accepted"), report)
-        XCTAssertTrue(report.contains("Speech works"), report)
-        XCTAssertTrue(report.contains("Cleanup works"), report)
+        XCTAssertTrue(report.contains("Speech works with whisper-x"), report)
+        XCTAssertTrue(report.contains("Clean up works with tidy-y"), report)
+    }
+
+    /// The counts sentence, on its own: the review's example, the singular
+    /// forms, and a service that has nothing usable.
+    func testTheCountsLine() {
+        let example = ModelCatalog.split((1...5).map { ModelEntry(id: "s\($0)", modelType: "audio_stt") }
+                                         + (1...7).map { ModelEntry(id: "c\($0)", modelType: "vlm") })
+        XCTAssertEqual(SettingsWindow.modelsLine(example), "Connected. 5 speech, 7 clean up models.")
+        XCTAssertEqual(SettingsWindow.modelsLine(ModelCatalog.split([])),
+                       "Reached the address, but it lists no speech or clean up models.")
+        let one = ModelCatalog.split([ModelEntry(id: "w", modelType: "audio_stt")])
+        XCTAssertEqual(SettingsWindow.modelsLine(one), "Connected. 1 speech, 0 clean up models.")
     }
 
     func testConnectionTestNamesABadKeyPlainly() async throws {
@@ -153,48 +202,53 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertFalse(report.contains("wrong"), "the key value itself never appears in reports")
     }
 
+    /// Test Connection still works with Apple Native chosen for both routes:
+    /// it checks the address and the key, and says both routes are Apple's.
+    func testConnectionTestWorksWithAppleNativeOnBothRoutes() async throws {
+        let report = await SettingsWindow.runConnectionTest(settings: EndpointSettings(address: service.baseURL), apiKey: "k")
+        XCTAssertTrue(report.contains("Connected. 1 speech, 1 clean up model."), report)
+        XCTAssertTrue(report.contains("Speech: Apple Native is chosen in the menu bar."), report)
+        XCTAssertTrue(report.contains("Clean up: Apple Native is chosen in the menu bar."), report)
+        XCTAssertFalse(report.contains("not chosen"), "Apple Native is a valid choice, not a missing one")
+    }
+
     /// Layout check: the settings page lives in a scroller, so controls are
-    /// judged against the document, must not overlap, and a full Test
-    /// Connection report must never push the window past a small screen.
+    /// judged against the document and must not overlap. A full report must
+    /// never push the window past a small screen.
     /// Set QS_SETTINGS_SHOTS to a folder to save a picture.
     func testWindowIsLaidOutCorrectly() throws {
         addressField.stringValue = service.baseURL
         commit(addressField)
         keyField.stringValue = "sk-for-the-photo"
         commit(keyField)
-        speechChoice_selectCustom()
         let win = try! XCTUnwrap(settings.window)
-        // The page scrolls: window content is a scroller, controls live in its document.
         let scroller = try XCTUnwrap(win.contentView as? NSScrollView)
         let doc = try XCTUnwrap(scroller.documentView)
-        let controls: [NSView] = ([addressField, keyField] as [NSTextField]) + combos + popups + [testButton]
+        let controls: [NSView] = ([addressField, keyField] as [NSTextField]) + [testButton]
         for control in controls {
             let frame = control.convert(control.bounds, to: doc)
             XCTAssertTrue(doc.bounds.contains(frame), "\(type(of: control)) outside the page: \(frame) in \(doc.bounds)")
             XCTAssertGreaterThan(frame.width, 40, "control too narrow: \(frame)")
             XCTAssertGreaterThan(frame.height, 16, "control too short: \(frame)")
         }
-        // Neighbours must not sit on top of each other.
         for (i, a) in controls.enumerated() {
             for b in controls.dropFirst(i + 1) {
                 let fa = a.convert(a.bounds, to: doc), fb = b.convert(b.bounds, to: doc)
                 XCTAssertFalse(fa.intersects(fb), "\(type(of: a)) overlaps \(type(of: b)): \(fa) vs \(fb)")
             }
         }
-        // The section headings and notes are drawn on the page.
         let visible = all(NSTextField.self, in: doc).filter { !$0.isHidden }
-        XCTAssertTrue(visible.contains { $0.stringValue == "Custom service" }, "heading missing")
-        XCTAssertTrue(visible.contains { $0.stringValue.contains("Apple's on-device models") }, "default explanation missing")
+        XCTAssertTrue(visible.contains { $0.stringValue == "Inference server" }, "heading missing")
+        XCTAssertTrue(visible.contains { $0.stringValue.contains("Apple Native only") },
+                      "the line telling people where models are chosen is missing")
 
-        // A full four-line report must not grow the window past a small screen:
-        // 1440x900 leaves about 800 visible points. Height stays fixed, the page scrolls.
         let report = all(NSTextField.self, in: doc).first { !$0.isEditable && ($0.font?.fontName.contains("Mono") ?? false) }
         let status = try XCTUnwrap(report, "Test Connection report label not found")
         status.stringValue = """
-        Reached the address. It has 18 models.
+        Connected. 5 speech, 7 clean up models.
         Key accepted.
-        Speech works (whisper).
-        Cleanup works (tidy).
+        Speech works with whisper-large-v3-8bit.
+        Clean up works with Qwen3.8-27B-4bit.
         Your words will leave this Mac and travel to host.example.
         """
         win.layoutIfNeeded()
@@ -204,28 +258,24 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertGreaterThan(status.frame.height, 40, "the report label must show all its lines")
 
         if let folder = ProcessInfo.processInfo.environment["QS_SETTINGS_SHOTS"] {
-            // A photo of the whole page, not just the visible part.
             guard let rep = doc.bitmapImageRepForCachingDisplay(in: doc.bounds) else { return }
             doc.cacheDisplay(in: doc.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/settings.png"))
         }
     }
 
-    private func speechChoice_selectCustom() {
-        popups[0].selectItem(at: 1)
-        commit(popups[0])
-    }
-    /// The prompt test runs the selected route for real: with Cleanup set to
-    /// Custom the request goes to the service with the service's own factory
-    /// text, and a wrong key answers with its plain sentence on screen.
+    /// The prompt test runs the selected route for real: with cleanup on a
+    /// service model (chosen in the menu, saved in settings) the request goes
+    /// to that service with its own factory text.
     func testPromptTestSendsToTheSelectedServiceRoute() async throws {
         try secrets.setSecret("k")
-        addressField.stringValue = service.baseURL
-        commit(addressField)
-        popups[1].selectItem(at: 1)              // Cleanup: Custom service
-        commit(popups[1])
-        combos[1].stringValue = "tidy-y"
-        commit(combos[1])
+        var s = EndpointSettings(address: service.baseURL, speechModel: "whisper-x", cleanupModel: "tidy-y",
+                                 useCustomSpeech: true, useCustomCleanup: true)
+        s.language = EndpointSettings.deviceLanguage
+        endpointStore().save(s)
+        settings.window?.close()
+        settings = SettingsWindow(library: library, endpointStore: endpointStore())
+        settings.show()
         service.queue(FakeService.Rule(status: 401, body: Data("{}".utf8)), forPath: "/v1/chat/completions")
 
         let root = try XCTUnwrap(settings.window?.contentView)
@@ -243,5 +293,4 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertTrue(messages[0]["content"]!.contains("publication-ready"),
                       "the service route tested its own longer factory set")
     }
-
 }

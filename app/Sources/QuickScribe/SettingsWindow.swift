@@ -25,18 +25,15 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
     private let testButton = NSButton(title: "Test Prompt", target: nil, action: nil)
     private let testOutput = SettingsWindow.makeTextView()
 
-    // Custom service controls.
+    // Inference server controls. Model choice lives in the menu bar, not here.
     let addressField = NSTextField(string: "")
     let keyField = NSSecureTextField(string: "")
-    let speechChoice = NSPopUpButton(frame: .zero, pullsDown: false)
-    let cleanupChoice = NSPopUpButton(frame: .zero, pullsDown: false)
-    let speechModelField = NSComboBox()
-    let cleanupModelField = NSComboBox()
     let wordsOutLabel = NSTextField(wrappingLabelWithString: "")
     let connectionTestButton = NSButton(title: "Test Connection", target: nil, action: nil)
     let connectionStatus = NSTextField(wrappingLabelWithString: "")
-    /// Bumped per address change so a late model list cannot overwrite a newer one.
-    var modelsFetchGeneration = 0
+    /// Told after the address or the key changes, so the menu's model lists can
+    /// be refreshed and a stale one dropped. (whether the address changed, whether the key changed)
+    var onConnectionChanged: ((Bool, Bool) -> Void)?
 
     init(library: PromptLibrary, endpointStore: EndpointSettingsStore) {
         self.library = library
@@ -253,8 +250,7 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         status.lineBreakMode = .byTruncatingTail
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // Custom service wiring: typed fields commit on focus loss or Enter,
-        // the two choices on click.
+        // Inference server wiring: typed fields commit on focus loss or Enter.
         addressField.placeholderString = "http://192.168.1.20:1234/v1"
         keyField.placeholderString = "Only if your service needs one"
         for field in [addressField, keyField] as [NSTextField] {
@@ -262,20 +258,6 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
             field.target = self
             field.action = #selector(connectionFieldEndedEditing(_:))
         }
-        for box in [speechModelField, cleanupModelField] {
-            box.isEditable = true
-            box.completes = false
-            box.placeholderString = "Type a name, or pick from the list"
-            box.delegate = self
-            box.target = self
-            box.action = #selector(connectionFieldEndedEditing(_:))
-        }
-        speechChoice.addItems(withTitles: ["Apple (on this Mac)", "Custom service"])
-        cleanupChoice.addItems(withTitles: ["Apple (on this Mac)", "Custom service"])
-        speechChoice.target = self
-        speechChoice.action = #selector(connectionChoiceChanged)
-        cleanupChoice.target = self
-        cleanupChoice.action = #selector(connectionChoiceChanged)
         connectionTestButton.target = self
         connectionTestButton.action = #selector(testConnectionTapped)
         connectionStatus.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
@@ -302,21 +284,17 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         connectionRow.widthAnchor.constraint(equalToConstant: 608).isActive = true
 
         let serviceStack = NSStackView(views: [
-            heading("Custom service"),
-            noteLabel("Blank by default. With no address everything runs on Apple's on-device models, on this Mac."),
+            heading("Inference server"),
+            noteLabel("Leave the address empty to use Apple Native only. Choose your models from the menu bar icon."),
             row("Address", addressField),
             row("API key", keyField),
-            row("Speech", speechChoice),
-            row("Speech model", speechModelField),
-            row("Cleanup", cleanupChoice),
-            row("Cleanup model", cleanupModelField),
             wordsOutLabel,
             connectionRow,
         ])
         serviceStack.orientation = .vertical
         serviceStack.alignment = .leading
         serviceStack.spacing = 6
-        for field in [addressField, keyField, speechModelField, cleanupModelField] {
+        for field in [addressField, keyField] {
             field.widthAnchor.constraint(equalToConstant: 470).isActive = true
         }
         for wide in [wordsOutLabel, connectionRow] {
