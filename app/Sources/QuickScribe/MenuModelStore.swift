@@ -59,6 +59,9 @@ final class MenuModelStore {
     private(set) var unreachable = false
     private(set) var lastFailure: EndpointError?
     private var inFlight = false
+    /// A refresh was asked for while one was already out and then dropped as
+    /// stale. It runs as soon as the stale answer comes back.
+    private var refreshWanted = false
     /// Generation bumps when the address or the key changes, so an answer to a
     /// question that is no longer being asked is thrown away.
     private var generation = 0
@@ -133,7 +136,13 @@ final class MenuModelStore {
             knownAddress = ""
             return
         }
-        guard !inFlight else { return }
+        if inFlight {
+            // An answer to the previous question is still out. Ask again as
+            // soon as it settles, so a changed address or key is never left
+            // waiting on a request that belongs to the old one.
+            refreshWanted = true
+            return
+        }
         let address = settings.normalizedAddress
         if address != knownAddress {
             // A different server: the old lists describe a different machine.
@@ -189,7 +198,16 @@ final class MenuModelStore {
     private func finish(_ result: Result<[ModelEntry], EndpointError>, generation gen: Int) {
         inFlight = false
         fetching = false
-        guard gen == generation else { return }   // an answer to a question we no longer ask
+        if gen != generation {
+            // This answer belongs to a question nobody is asking any more. If
+            // one was asked meanwhile, it goes out now, not left waiting.
+            if refreshWanted {
+                refreshWanted = false
+                refreshIfUseful()
+            }
+            return
+        }
+        refreshWanted = false
         switch result {
         case .success(let entries):
             let lists = ModelCatalog.split(entries)

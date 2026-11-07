@@ -5,7 +5,7 @@ import QuickScribeCore
 /// Prompts" for each mode, and a sandbox that runs the text on screen without
 /// saving it.
 @MainActor
-final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {   // NSComboBoxDelegate inherits NSTextFieldDelegate
+final class SettingsWindow: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private static let sampleDictation =
         "um so basically the report was written by Sarah and uh we should meet at 2, actually 3, to go over it"
 
@@ -39,6 +39,14 @@ final class SettingsWindow: NSObject, NSTextViewDelegate, NSComboBoxDelegate {  
         self.library = library
         self.endpointStore = endpointStore
         super.init()
+    }
+
+    /// A choice made in the menu bar changes which routes send words out, so
+    /// an open Settings page re-reads its controls and its warning. Without
+    /// this the "Your words will leave this Mac" line could be stale.
+    func connectionChangedOutside() {
+        guard window != nil else { return }
+        reloadConnection()
     }
 
     func show() {

@@ -333,6 +333,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// session reads the settings when it starts.
     private func setModelChoice(label: String, apple: Bool, model: String? = nil) {
         endpointStore.save(MainMenuAssembly.applied(endpointStore.load(), label: label, apple: apple, model: model))
+        // The Settings page, if it is open, may now be describing a route that
+        // no longer sends words, or miss one that does.
+        settingsWindow.connectionChangedOutside()
         rebuildMenu()
     }
 

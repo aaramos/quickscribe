@@ -245,7 +245,30 @@ final class MenuModelStoreTests: XCTestCase {
         XCTAssertFalse(models.snapshot().speech.keyRefused)
     }
 
-    // MARK: - Y4: freshness without waiting
+    /// Z5(a): a refresh asked for while a stale answer is in flight must not
+    /// be dropped. Before this fix the store returned early and the new address
+    /// waited for nothing.
+    func testAnAnswerToAnOldAddressIsDroppedAndAsksAgain() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "w", useCustomSpeech: true)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.setDelay(0.4)
+        caller.answer(.success([ModelEntry(id: "old-model", modelType: "audio_stt")]))
+        let models = makeStore(caller)
+        models.refreshIfUseful()
+        s.address = "http://127.0.0.1:9999/v1"
+        store.save(s)
+        models.addressChanged()
+        caller.setDelay(0)
+        caller.answer(.success([ModelEntry(id: "new-model", modelType: "audio_stt")]))
+        models.refreshIfUseful()               // asked for while the old one is out
+        await waitUntil { models.speechModels.contains("new-model") }
+        XCTAssertEqual(models.speechModels, ["new-model"], "the new server's list, not the old one's")
+        XCTAssertEqual(caller.seen.count, 2, "two requests: the stale one and the new one")
+    }
+
+
 
     func testTheMenuNeverWaitsForTheServer() async {
         var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "w", useCustomSpeech: true)

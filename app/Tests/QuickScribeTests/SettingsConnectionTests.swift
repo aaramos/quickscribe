@@ -224,6 +224,27 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertTrue(after.useCustomCleanup)
     }
 
+    /// Z5(b): a route chosen in the menu bar while Settings is open must
+    /// refresh this page, or its "words will leave this Mac" line is stale.
+    func testAMenuChoiceRefreshesAnOpenSettingsPage() throws {
+        // A non-local address, both routes still Apple: no warning yet.
+        addressField.stringValue = "https://some-service.example"
+        commit(addressField)
+        XCTAssertFalse(all(NSTextField.self, in: root).contains { $0.stringValue.contains("leave this Mac") })
+
+        // The menu bar now switches speech to a server model.
+        var s = endpointStore().load()
+        s.useCustomSpeech = true
+        s.speechModel = "whisper-x"
+        endpointStore().save(s)
+        settings.connectionChangedOutside()
+
+        XCTAssertTrue(all(NSTextField.self, in: root).contains { $0.stringValue.contains("leave this Mac") },
+                      "the warning must appear once a route really sends words")
+        XCTAssertEqual(addressField.stringValue, "https://some-service.example",
+                       "the page re-reads the saved values without losing the address")
+    }
+
     func testNonLocalAddressShowsTheLeavingWarning() throws {
         var s = endpointStore().load()
         s.useCustomSpeech = true                 // what the menu would set
