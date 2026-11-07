@@ -9,6 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let prompts = PromptLibrary(fileURL: AppInfo.dataFolder.appendingPathComponent("prompts.json"))
     private lazy var endpointStore = EndpointSettingsStore(secrets: KeychainSecrets(service: AppInfo.bundleID + ".endpoint"))
     private lazy var session = SessionController(prompts: prompts, endpointStore: endpointStore)
+    /// What the two model submenus show, and the background refresh behind them.
+    private lazy var modelStore = MenuModelStore(endpointStore: endpointStore)
+    /// Builds the menu bar menu. Owns nothing itself, so it can be read in a test.
+    private let menuAssembly = MainMenuAssembly()
     private lazy var settingsWindow = SettingsWindow(library: prompts, endpointStore: endpointStore)
 
     /// Icon A equalizer animation — runs ONLY while recording.
@@ -37,6 +41,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = AppInfo.displayName
         rebuildMenu()
 
+        wireMenuActions()
+        modelStore.refreshIfUseful()   // beside the app, never before it
+        settingsWindow.onConnectionChanged = { [weak self] addressChanged, keyChanged in
+            guard let self else { return }
+            if addressChanged { self.modelStore.addressChanged() }
+            if keyChanged { self.modelStore.keyChanged() }
+            self.modelStore.refreshIfUseful()
+            self.rebuildMenu()
+        }
         session.onProfileChange = { [weak self] in self?.rebuildMenu() }
         session.onPhaseChange = { [weak self] recording in
             guard let self = self else { return }
@@ -259,67 +272,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu
 
     private func rebuildMenu() {
-        let menu = NSMenu()
+        // The menu is a value: everything it shows is read now, and a menu
+        // already open keeps what it was given.
+        let settings = endpointStore.load()
+        let state = MainMenuAssembly.State(
+            hotkeysOff: !hotkeysLive,
+            cleanupProblem: cleanupProblem,
+            recording: session.isRecording,
+            profile: session.defaultProfile,
+            snapshot: modelStore.snapshot(),
+            updateVersion: availableUpdate?.version,
+            speechModel: settings.speechModel,
+            cleanupModel: settings.cleanupModel)
+        statusItem.menu = menuAssembly.build(state)
+    }
 
-        if !hotkeysLive {
-            let dead = NSMenuItem(title: "⚠ Hotkeys off: grant Accessibility", action: #selector(openAXSettings), keyEquivalent: "")
-            dead.target = self
-            menu.addItem(dead)
-        }
+    /// Where the assembly's clicks land: each one changes the app and rebuilds
+    /// the menu, so the next open shows the new choice.
+    private func wireMenuActions() {
+        menuAssembly.actions = MainMenuAssembly.Actions(
+            selectProfile: { [weak self] id in self?.session.selectProfile(id) },
+            chooseApple: { [weak self] label in self?.setModelChoice(label: label, apple: true) },
+            chooseModel: { [weak self] label, model in
+                self?.setModelChoice(label: label, apple: false, model: model)
+            },
+            toggleHandsFree: { [weak self] in self?.session.toggleHandsFree() },
+            openAccessibility: { [weak self] in self?.openAXSettings() },
+            openReleasePage: { [weak self] in self?.openReleasePage() },
+            showSettings: { [weak self] in self?.showSettings() },
+            refreshModels: { [weak self] in self?.modelStore.refreshIfUseful() })
+    }
 
-        if let cleanupProblem {
-            let item = NSMenuItem(title: "⚠ \(cleanupProblem) Dictation still works, without AI cleanup.", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-
-        let how = NSMenuItem(title: "Hold \(AppInfo.holdLabel) to talk, release to insert", action: nil, keyEquivalent: "")
-        how.isEnabled = false
-        menu.addItem(how)
-
-        // Hold-only keyboard gesture → hands-free toggle lives here.
-        let toggle = NSMenuItem(title: session.isRecording ? "Stop Recording (hands-free)" : "Start Recording (hands-free)",
-                                action: #selector(toggleHandsFree), keyEquivalent: "")
-        toggle.target = self
-        menu.addItem(toggle)
-
-        for (index, mode) in RefineMode.all.enumerated() {
-            let item = NSMenuItem(title: "\(mode.title)  (\(AppInfo.holdLabel)\(index + 1))",
-                                  action: #selector(selectProfile(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = mode.id
-            item.state = session.defaultProfile == mode.id ? .on : .off
-            menu.addItem(item)
-        }
-
-        let rewrite = NSMenuItem(title: "Rewrite  (or hold \(AppInfo.holdRewriteLabel))",
-                                 action: #selector(selectProfile(_:)), keyEquivalent: "")
-        rewrite.target = self
-        rewrite.representedObject = RefineMode.rewriteProfile
-        rewrite.state = session.defaultProfile == RefineMode.rewriteProfile ? .on : .off
-        menu.addItem(rewrite)
-
-        if let update = availableUpdate {
-            // Only when a check actually said newer; opens GitHub's own page
-            // for that release, where the person can read what changed.
-            let item = NSMenuItem(title: "Update available: version \(update.version)",
-                                  action: #selector(openReleasePage), keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-        }
-
-        menu.addItem(.separator())
-
-        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: "Quit \(AppInfo.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
-
-        statusItem.menu = menu
+    /// Apple Native, or a server model, on one route only: speech and cleanup
+    /// are independent. A choice applies from the next dictation, because every
+    /// session reads the settings when it starts.
+    private func setModelChoice(label: String, apple: Bool, model: String? = nil) {
+        endpointStore.save(MainMenuAssembly.applied(endpointStore.load(), label: label, apple: apple, model: model))
+        rebuildMenu()
     }
 
     @objc private func openAXSettings() {
@@ -328,10 +317,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func selectProfile(_ sender: NSMenuItem) {
-        guard let profile = sender.representedObject as? String else { return }
-        session.selectProfile(profile)
-    }
     @objc private func showSettings() { settingsWindow.show() }
-    @objc private func toggleHandsFree() { session.toggleHandsFree() }
 }
