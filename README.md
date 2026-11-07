@@ -24,7 +24,10 @@ route can point at your own OpenAI-compatible service instead (see below).
    hour after the attempt. Click it where it appears next to the message about
    QuickScribe; if you don't see it where you are, search "Open Anyway" in System
    Settings. This is a one-time step.
-3. Grant Microphone and Accessibility when asked, then quit and reopen the app.
+3. Grant Microphone and Accessibility when asked, then quit and reopen the app. If the
+   menu bar says hotkeys are off but QuickScribe already looks switched on in System
+   Settings, remove it with the minus button and add it again. A switch can look on
+   while it does not apply, usually after an older copy of the app.
 4. Look for the icon in the menu bar. There's no window.
 
 To build the installer yourself, run `app/make_installer.sh`.
@@ -45,8 +48,8 @@ opens that release's page; the menu bar icon itself does not change. The notice 
 interrupts a dictation: if you are recording, it waits for a quiet moment. The app never
 downloads or installs anything itself: you drag the new disk image to Applications when
 you choose. After an update macOS may ask for Microphone and Accessibility again; switch
-them back on if the hotkeys go quiet, and if a switch already looks on, turn it off and
-on again. Your settings and edited prompts survive the update. Releases carry one steady self-made signature, so an update is the same app to macOS; coming from v1.0, which had a throwaway signature, means granting permissions again once, whatever the signature.
+them back on if the hotkeys go quiet. If a switch already looks on but the hotkeys are
+dead, remove QuickScribe from that list with the minus button and add it again. Your settings and edited prompts survive the update. Releases carry one steady self-made signature, so an update is the same app to macOS; coming from v1.0, which had a throwaway signature, means granting permissions again once, whatever the signature.
 
 ## Your own service (optional)
 

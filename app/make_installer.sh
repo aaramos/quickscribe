@@ -32,6 +32,8 @@ What it needs, before you start:
    "Open Anyway" in System Settings. It is a one-time step.
 3. Grant Microphone and Accessibility when asked. On macOS 27, Accessibility lives
    under System Settings > Device Control and Data Access. Then quit and reopen the app.
+    If the menu bar says hotkeys are off but ${APP_NAME} already looks switched on there,
+    remove it with the minus button and add it again.
 4. Look for the icon in the menu bar. There is no window. Hold control-command to talk,
    release to insert.
 
@@ -43,8 +45,9 @@ installs anything itself. To update: quit the app, download
 the new disk image from the release page, drag the app to Applications to replace the
 old one, and reopen. Releases share one steady self-made signature, so an update is the
 same app to macOS. macOS may still ask for Microphone and Accessibility after an update:
-switch them back on if the hotkeys stop working, and if a switch already looks on, turn
-it off and on again. Coming from version 1.0, which had a throwaway signature, expect to
+switch them back on if the hotkeys stop working. If a switch already looks on but the
+hotkeys are dead, remove ${APP_NAME} from that list with the minus button and add it
+again. Coming from version 1.0, which had a throwaway signature, expect to
 grant permissions once more whatever you do.
 
 Your words stay on this Mac unless you turn on a custom service in Settings. With a
