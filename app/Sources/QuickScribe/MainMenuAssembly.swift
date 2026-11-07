@@ -33,6 +33,10 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
         var openReleasePage: () -> Void
         var showSettings: () -> Void
         var refreshModels: () -> Void
+        // The menu was opened or closed. The app tracks this so a refresh that
+        // lands mid-read rebuilds on close instead of under the reader.
+        var menuDidOpen: () -> Void
+        var menuDidClose: () -> Void
     }
 
     var actions: Actions?
@@ -155,7 +159,16 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
         apple.state = chooseApple ? .on : .off
         menu.addItem(apple)
 
-        if route.unreachable {
+        // A note that says only what is true: checking, a refusal, or no answer.
+        if route.checking {
+            let note = NSMenuItem(title: MainMenuBuilder.checkingNote, action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            menu.addItem(note)
+        } else if route.keyRefused {
+            let note = NSMenuItem(title: MainMenuBuilder.keyRefusedNote, action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            menu.addItem(note)
+        } else if route.unreachable {
             let note = NSMenuItem(title: MainMenuBuilder.noServerNote, action: nil, keyEquivalent: "")
             note.isEnabled = false
             menu.addItem(note)
@@ -176,7 +189,7 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
             menu.addItem(item)
             if !missing { offered += 1 }
         }
-        if offered == 0, !route.unreachable {
+        if offered == 0, !route.unreachable, !route.checking, !route.keyRefused {
             let text = label == MainMenuBuilder.speechLabel
                 ? MainMenuBuilder.noSpeechModelsNote : MainMenuBuilder.noCleanupModelsNote
             let note = NSMenuItem(title: text, action: nil, keyEquivalent: "")
@@ -221,7 +234,13 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
     /// screen is the one already built and is not touched.
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === builtMenu else { return }
+        actions?.menuDidOpen()
         actions?.refreshModels()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard menu === builtMenu else { return }
+        actions?.menuDidClose()
     }
 
     // MARK: - Item actions

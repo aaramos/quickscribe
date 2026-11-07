@@ -13,6 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var modelStore = MenuModelStore(endpointStore: endpointStore)
     /// Builds the menu bar menu. Owns nothing itself, so it can be read in a test.
     private let menuAssembly = MainMenuAssembly()
+    /// A menu is on screen. A refresh that lands now waits for the close, so
+    /// the list never changes under the person reading it.
+    private var menuIsOpen = false
+    private var rebuildAfterClose = false
     private lazy var settingsWindow = SettingsWindow(library: prompts, endpointStore: endpointStore)
 
     /// Icon A equalizer animation — runs ONLY while recording.
@@ -42,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
 
         wireMenuActions()
+        modelStore.onRefreshFinished = { [weak self] in self?.refreshLanded() }
         modelStore.refreshIfUseful()   // beside the app, never before it
         settingsWindow.onConnectionChanged = { [weak self] addressChanged, keyChanged in
             guard let self else { return }
@@ -287,6 +292,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menuAssembly.build(state)
     }
 
+    /// A refresh finished. The menu is rebuilt so the fresh list is actually
+    /// seen, unless a menu is on screen: rebuilding then would yank it from
+    /// under the person reading it, so the rebuild waits for the close.
+    private func refreshLanded() {
+        if menuIsOpen {
+            rebuildAfterClose = true
+        } else {
+            rebuildMenu()
+        }
+    }
+
     /// Where the assembly's clicks land: each one changes the app and rebuilds
     /// the menu, so the next open shows the new choice.
     private func wireMenuActions() {
@@ -300,7 +316,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openAccessibility: { [weak self] in self?.openAXSettings() },
             openReleasePage: { [weak self] in self?.openReleasePage() },
             showSettings: { [weak self] in self?.showSettings() },
-            refreshModels: { [weak self] in self?.modelStore.refreshIfUseful() })
+            refreshModels: { [weak self] in self?.modelStore.refreshIfUseful() },
+            menuDidOpen: { [weak self] in self?.menuIsOpen = true },
+            menuDidClose: { [weak self] in
+                guard let self else { return }
+                self.menuIsOpen = false
+                if self.rebuildAfterClose {
+                    self.rebuildAfterClose = false
+                    self.rebuildMenu()
+                }
+            })
     }
 
     /// Apple Native, or a server model, on one route only: speech and cleanup

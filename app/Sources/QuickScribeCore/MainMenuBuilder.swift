@@ -10,6 +10,8 @@ public enum MainMenuBuilder {
     public static let titleNameLimit = 34
 
     public static let noServerNote = "Server can't be reached"
+    public static let checkingNote = "Checking server…"
+    public static let keyRefusedNote = "Server refused the API key"
     public static let notAvailableNote = "not available"
     public static let noSpeechModelsNote = "The server lists no speech models"
     public static let noCleanupModelsNote = "The server lists no clean up models"

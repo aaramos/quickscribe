@@ -21,6 +21,8 @@ final class MenuBarMenuTests: XCTestCase {
         var models: [(String, String)] = []
         var refreshes = 0
         var handsFree = 0
+        var opened = 0
+        var closed = 0
     }
 
     override func setUp() async throws {
@@ -43,7 +45,9 @@ final class MenuBarMenuTests: XCTestCase {
             openAccessibility: {},
             openReleasePage: {},
             showSettings: {},
-            refreshModels: { recorded.refreshes += 1 })
+            refreshModels: { recorded.refreshes += 1 },
+            menuDidOpen: { recorded.opened += 1 },
+            menuDidClose: { recorded.closed += 1 })
     }
 
     override func tearDown() {
@@ -247,6 +251,101 @@ final class MenuBarMenuTests: XCTestCase {
         let cleanup = full.items.first { $0.title.hasPrefix("Clean Up Model: ") }!.submenu!
         XCTAssertEqual(cleanup.items.filter { $0.state == .on }.count, 1)
         XCTAssertEqual(cleanup.items.first?.state, .on, "cleanup is on Apple Native")
+    }
+
+    // MARK: - Z2: never a false empty list
+
+    func testWhileCheckingTheMenuSaysSoAndNeverClaimsNoModels() {
+        let checking = MenuModelStore.Route(entries: ["Apple Native"], unreachable: false,
+                                            missingChoice: nil, checking: true)
+        for label in [MainMenuBuilder.speechLabel, MainMenuBuilder.cleanupLabel] {
+            let menu = app.modelSubmenu(label: label, route: checking, chooseApple: true, chosen: "")
+            XCTAssertTrue(menu.items.contains { $0.title == MainMenuBuilder.checkingNote }, label)
+            XCTAssertFalse(menu.items.contains { $0.title == MainMenuBuilder.noSpeechModelsNote }, label)
+            XCTAssertFalse(menu.items.contains { $0.title == MainMenuBuilder.noCleanupModelsNote }, label)
+            XCTAssertFalse(menu.items.contains { $0.title == MainMenuBuilder.noServerNote }, label)
+        }
+    }
+
+    func testAReachableServerThatListsNothingStillGetsTheNoModelsNote() {
+        let answered = MenuModelStore.Route(entries: ["Apple Native"], unreachable: false,
+                                            missingChoice: nil, checking: false)
+        let menu = app.modelSubmenu(label: MainMenuBuilder.speechLabel, route: answered, chooseApple: true, chosen: "")
+        XCTAssertTrue(menu.items.contains { $0.title == MainMenuBuilder.noSpeechModelsNote },
+                      "an answer with no speech models is a real answer, and says so")
+        XCTAssertFalse(menu.items.contains { $0.title == MainMenuBuilder.checkingNote })
+    }
+
+    func testARefusedKeyIsNamedAsARefusal() {
+        let refused = MenuModelStore.Route(entries: ["Apple Native"], unreachable: false,
+                                           missingChoice: nil, checking: false, keyRefused: true)
+        let menu = app.modelSubmenu(label: MainMenuBuilder.speechLabel, route: refused, chooseApple: false, chosen: "")
+        XCTAssertTrue(menu.items.contains { $0.title == MainMenuBuilder.keyRefusedNote })
+        XCTAssertFalse(menu.items.contains { $0.title == MainMenuBuilder.noServerNote },
+                       "a refused key is not an unreachable server")
+        XCTAssertFalse(menu.items.contains { $0.title == MainMenuBuilder.noSpeechModelsNote })
+    }
+
+    /// The launch path, end to end through the app's own store: the menu is
+    /// built before the answer, then again when the answer lands.
+    func testLaunchShowCheckingThenTheModels() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "", useCustomSpeech: false)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let slow = MenuModelStore(endpointStore: store) { _, _ in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return .success([ModelEntry(id: "whisper-x", modelType: "audio_stt"),
+                             ModelEntry(id: "tidy-y", modelType: "vlm")])
+        }
+        var rebuilt: [MenuModelStore.Snapshot] = []
+        slow.onRefreshFinished = { rebuilt.append(slow.snapshot()) }
+        slow.refreshIfUseful()
+
+        // What the app builds at launch, before any answer.
+        let launch = slow.snapshot()
+        XCTAssertTrue(launch.speech.checking, "at launch the menu says it is checking")
+        let launchMenu = app.build(MainMenuAssembly.State(
+            hotkeysOff: false, cleanupProblem: nil, recording: false, profile: "polish",
+            snapshot: launch, updateVersion: nil, speechModel: s.speechModel, cleanupModel: s.cleanupModel))
+        let launchSpeech = launchMenu.items.first { $0.title.hasPrefix("Speech Model: ") }!.submenu!
+        XCTAssertFalse(launchSpeech.items.contains { $0.title == MainMenuBuilder.noSpeechModelsNote },
+                       "the false empty list is never shown while checking")
+
+        await waitUntil { !rebuilt.isEmpty }
+        XCTAssertEqual(rebuilt.first?.speech.entries, ["Apple Native", "whisper-x"],
+                       "the rebuild that follows the answer carries the models")
+        XCTAssertEqual(rebuilt.first?.cleanup.entries, ["Apple Native", "tidy-y"])
+    }
+
+    /// A menu open when the answer lands keeps what it showed; the rebuild
+    /// happens on close. Modeled here with the same open/close signals.
+    func testAMenuOpenDuringTheAnswerKeepsItsListThenRebuildsOnClose() {
+        let before = MenuModelStore.Snapshot(
+            speech: MenuModelStore.Route(entries: ["Apple Native", "old"], unreachable: false, missingChoice: nil),
+            cleanup: MenuModelStore.Route(entries: ["Apple Native"], unreachable: false, missingChoice: nil),
+            speechIsApple: false, cleanupIsApple: true)
+        let shown = app.build(MainMenuAssembly.State(
+            hotkeysOff: false, cleanupProblem: nil, recording: false, profile: "polish",
+            snapshot: before, updateVersion: nil, speechModel: "old", cleanupModel: ""))
+        let shownSpeech = shown.items.first { $0.title.hasPrefix("Speech Model: ") }!.submenu!
+        XCTAssertTrue(shownSpeech.items.contains { $0.title == "old" })
+
+        app.actions?.menuDidOpen()
+        app.actions?.refreshModels()
+        XCTAssertEqual(actions.opened, 1)
+        XCTAssertEqual(actions.refreshes, 1)
+        // The menu on screen was not rebuilt: it still shows the same items.
+        XCTAssertTrue(shownSpeech.items.contains { $0.title == "old" })
+        app.actions?.menuDidClose()
+        XCTAssertEqual(actions.closed, 1)
+    }
+
+    private func waitUntil(_ done: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        let deadline = Date().addingTimeInterval(5)
+        while !done() {
+            if Date() > deadline { XCTFail("condition never happened", file: file, line: line); return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
     }
 
     // MARK: - Choosing

@@ -164,6 +164,59 @@ final class MenuModelStoreTests: XCTestCase {
         XCTAssertTrue(snap.speech.unreachable)
     }
 
+    // MARK: - Z2: the answer reaches the menu
+
+    func testTheStoreTellsTheAppWhenARefreshSettles() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "w", useCustomSpeech: true)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.setDelay(0.2)
+        caller.answer(.success([ModelEntry(id: "w", modelType: "audio_stt")]))
+        let models = makeStore(caller)
+        var landed = 0
+        models.onRefreshFinished = { landed += 1 }
+        models.refreshIfUseful()
+        XCTAssertEqual(landed, 0, "nothing has come back yet")
+        await waitUntil { landed == 1 }
+        XCTAssertEqual(models.speechModels, ["w"])
+    }
+
+    func testAFailedRefreshAlsoTellsTheApp() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "w", useCustomSpeech: true)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.answer(.failure(.notReached("offline")))
+        let models = makeStore(caller)
+        var landed = 0
+        models.onRefreshFinished = { landed += 1 }
+        models.refreshIfUseful()
+        await waitUntil { landed == 1 }
+        XCTAssertTrue(models.unreachable)
+    }
+
+    /// Before any answer, the menu says it is checking. It must never claim the
+    /// server lists no speech models, which is what a first launch showed.
+    func testBeforeAnyAnswerTheRouteIsCheckingNotEmpty() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "", useCustomSpeech: false)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.setDelay(0.5)
+        caller.answer(.success([ModelEntry(id: "w", modelType: "audio_stt")]))
+        let models = makeStore(caller)
+        models.refreshIfUseful()
+        let snap = models.snapshot()
+        XCTAssertTrue(snap.speech.checking, "a refresh is out and nothing is known")
+        XCTAssertTrue(snap.cleanup.checking)
+        XCTAssertFalse(models.unreachable, "checking is not the same as unreachable")
+        await waitUntil { !models.speechModels.isEmpty }
+        let after = models.snapshot()
+        XCTAssertFalse(after.speech.checking, "the answer landed, so it is no longer checking")
+        XCTAssertEqual(after.speech.entries, ["Apple Native", "w"])
+    }
+
     // MARK: - Y4: freshness without waiting
 
     func testTheMenuNeverWaitsForTheServer() async {

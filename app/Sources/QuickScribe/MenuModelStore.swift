@@ -28,6 +28,11 @@ final class MenuModelStore {
         var unreachable: Bool
         /// A chosen model the service no longer lists. Shown with a note.
         var missingChoice: String?
+        /// A refresh is out and no answer has come yet. The menu says so
+        /// instead of claiming the server has no models.
+        var checking: Bool = false
+        /// The service answered but refused the key, so there is nothing to list.
+        var keyRefused: Bool = false
     }
 
     /// A whole menu's worth of state, read once per open.
@@ -62,6 +67,11 @@ final class MenuModelStore {
     /// read can prompt, and a menu opening is no reason to ever prompt.
     private var keyForLaunch: String?
     private var keyRead = false
+    /// Told after every refresh settles (an answer, a refusal, or the limit).
+    /// The app rebuilds its menu then, so a fresh list is not left unseen.
+    var onRefreshFinished: (() -> Void)?
+    /// True while a request is out. Read by snapshot() to say "Checking server…".
+    private(set) var fetching = false
 
     init(endpointStore: EndpointSettingsStore,
          fetch: @escaping @Sendable (EndpointSettings, String?) async -> Result<[ModelEntry], EndpointError>
@@ -79,9 +89,8 @@ final class MenuModelStore {
     func snapshot() -> Snapshot {
         let settings = endpointStore.load()
         guard settings.isEnabled else {
-            return Snapshot(speech: Route(entries: [Self.appleNative], unreachable: false, missingChoice: nil),
-                            cleanup: Route(entries: [Self.appleNative], unreachable: false, missingChoice: nil),
-                            speechIsApple: true, cleanupIsApple: true)
+            let appleOnly = Route(entries: [Self.appleNative], unreachable: false, missingChoice: nil)
+            return Snapshot(speech: appleOnly, cleanup: appleOnly, speechIsApple: true, cleanupIsApple: true)
         }
         let speech = route(settings.speechModel, models: speechModels, usesService: settings.speechUsesEndpoint)
         let cleanup = route(settings.cleanupModel, models: cleanupModels, usesService: settings.cleanupUsesEndpoint)
@@ -98,7 +107,16 @@ final class MenuModelStore {
         // appended rather than removed, so the choice reads back honestly.
         let missing = usesService && !chosen.isEmpty && !models.contains(chosen) ? chosen : nil
         if let missing { entries.append(missing) }
-        return Route(entries: entries, unreachable: unreachable, missingChoice: missing)
+        // Before any answer has come, the menu says it is checking rather than
+        // claiming the server has no models. A refusal is named as itself.
+        let nothingKnown = models.isEmpty && missing == nil
+        let refused: Bool
+        if case .unauthorized? = lastFailure { refused = true } else { refused = false }
+        return Route(entries: entries,
+                     unreachable: unreachable,
+                     missingChoice: missing,
+                     checking: nothingKnown && fetching,
+                     keyRefused: nothingKnown && refused)
     }
 
     // MARK: - Keeping it fresh
@@ -124,6 +142,7 @@ final class MenuModelStore {
             generation += 1
         }
         inFlight = true
+        fetching = true
         let gen = generation
         Task { [weak self] in
             guard let self else { return }
@@ -168,6 +187,7 @@ final class MenuModelStore {
 
     private func finish(_ result: Result<[ModelEntry], EndpointError>, generation gen: Int) {
         inFlight = false
+        fetching = false
         guard gen == generation else { return }   // an answer to a question we no longer ask
         switch result {
         case .success(let entries):
@@ -180,5 +200,6 @@ final class MenuModelStore {
             lastFailure = error
             unreachable = true
         }
+        onRefreshFinished?()
     }
 }
