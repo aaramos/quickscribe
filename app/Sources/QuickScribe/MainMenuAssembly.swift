@@ -118,7 +118,7 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
                            route: MenuModelStore.Route) -> NSMenuItem {
         let title = MainMenuBuilder.title(label, Self.choiceName(apple, chosen))
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.submenu = modelSubmenu(label: label, route: route, chooseApple: apple)
+        item.submenu = modelSubmenu(label: label, route: route, chooseApple: apple, chosen: chosen)
         return item
     }
 
@@ -146,7 +146,8 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
     /// One model submenu. Apple Native is always first. A model the service no
     /// longer lists stays, marked and not clickable, so the choice is never
     /// silently swapped. Nothing here waits: the list is what the last refresh left.
-    func modelSubmenu(label: String, route: MenuModelStore.Route, chooseApple: Bool) -> NSMenu {
+    func modelSubmenu(label: String, route: MenuModelStore.Route, chooseApple: Bool,
+                      chosen: String = "") -> NSMenu {
         let menu = NSMenu(title: label)
         let apple = NSMenuItem(title: MenuModelStore.appleNative, action: #selector(appleTapped(_:)), keyEquivalent: "")
         apple.target = self
@@ -168,7 +169,10 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
             item.target = self
             item.representedObject = ModelChoice(label: label, model: name)
             item.isEnabled = !missing
-            item.state = !chooseApple && !missing ? .on : (missing ? .on : .off)
+            // Exactly one checkmark, on the model actually chosen. A model the
+            // service stopped listing is still the choice, so it still wears it.
+            let isChoice = !chooseApple && chosen == name
+            item.state = isChoice ? .on : .off
             menu.addItem(item)
             if !missing { offered += 1 }
         }

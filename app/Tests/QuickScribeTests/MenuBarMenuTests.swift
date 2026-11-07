@@ -155,8 +155,10 @@ final class MenuBarMenuTests: XCTestCase {
         store.save(s)
         await reloadModels()
         let snap = models.snapshot()
-        let speech = app.modelSubmenu(label: MainMenuBuilder.speechLabel, route: snap.speech, chooseApple: snap.speechIsApple)
-        let cleanup = app.modelSubmenu(label: MainMenuBuilder.cleanupLabel, route: snap.cleanup, chooseApple: snap.cleanupIsApple)
+        let speech = app.modelSubmenu(label: MainMenuBuilder.speechLabel, route: snap.speech,
+                                      chooseApple: snap.speechIsApple, chosen: s.speechModel)
+        let cleanup = app.modelSubmenu(label: MainMenuBuilder.cleanupLabel, route: snap.cleanup,
+                                       chooseApple: snap.cleanupIsApple, chosen: s.cleanupModel)
         XCTAssertEqual(speech.items.first { $0.state == .on }?.title, "whisper-large-v3-8bit")
         XCTAssertEqual(cleanup.items.first { $0.state == .on }?.title, "Qwen3.8-27B-4bit")
         XCTAssertNotNil(speech.items.first { $0.state == .on }?.representedObject as? MainMenuAssembly.ModelChoice)
@@ -177,7 +179,7 @@ final class MenuBarMenuTests: XCTestCase {
         let menu = app.modelSubmenu(label: MainMenuBuilder.speechLabel,
                                     route: MenuModelStore.Route(entries: ["Apple Native", "old-whisper"],
                                                                 unreachable: false, missingChoice: "old-whisper"),
-                                    chooseApple: false)
+                                    chooseApple: false, chosen: "old-whisper")
         let item = menu.items.first { $0.title.hasPrefix("old-whisper") }
         XCTAssertNotNil(item)
         XCTAssertTrue(item!.title.contains(MainMenuBuilder.notAvailableNote), item!.title)
@@ -196,6 +198,55 @@ final class MenuBarMenuTests: XCTestCase {
                                                                   missingChoice: nil),
                                       chooseApple: true)
         XCTAssertTrue(speech.items.contains { $0.title == MainMenuBuilder.noSpeechModelsNote })
+    }
+
+    /// Z1: one checkmark per submenu, on the chosen model, even when it is not
+    /// the first in the list. This is the exact case the earlier test missed.
+    func testExactlyOneCheckmarkOnTheChosenModelNotTheFirst() {
+        for label in [MainMenuBuilder.speechLabel, MainMenuBuilder.cleanupLabel] {
+            let route = MenuModelStore.Route(entries: ["Apple Native", "alpha", "beta", "gamma"],
+                                             unreachable: false, missingChoice: nil)
+            let menu = app.modelSubmenu(label: label, route: route, chooseApple: false, chosen: "gamma")
+            let checked = menu.items.filter { $0.state == .on }
+            XCTAssertEqual(checked.count, 1, "\(label): exactly one checkmark, got \(checked.map(\.title))")
+            XCTAssertEqual(checked.first?.title, "gamma", "\(label): the checkmark is on the chosen model")
+            XCTAssertEqual(menu.items.first?.state, .off, "\(label): Apple Native is not checked")
+        }
+    }
+
+    func testTheFirstModelIsNotCheckedJustForBeingFirst() {
+        let route = MenuModelStore.Route(entries: ["Apple Native", "alpha", "beta"], unreachable: false,
+                                         missingChoice: nil)
+        let menu = app.modelSubmenu(label: MainMenuBuilder.speechLabel, route: route,
+                                    chooseApple: false, chosen: "beta")
+        XCTAssertEqual(menu.items.map(\.state), [.off, .off, .on])
+    }
+
+    func testAppleNativeCheckedMeansNoModelIsChecked() {
+        let route = MenuModelStore.Route(entries: ["Apple Native", "alpha", "beta"], unreachable: false,
+                                         missingChoice: nil)
+        let menu = app.modelSubmenu(label: MainMenuBuilder.cleanupLabel, route: route,
+                                    chooseApple: true, chosen: "beta")
+        XCTAssertEqual(menu.items.filter { $0.state == .on }.count, 1)
+        XCTAssertEqual(menu.items.first?.state, .on)
+    }
+
+    /// The whole menu, built by the app's own path: the checkmark follows the
+    /// saved choice, in each submenu, on a model that is not first.
+    func testTheWholeMenuChecksTheSavedChoice() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "parakeet-tdt-0.6b-v3",
+                                 cleanupModel: "", useCustomSpeech: true, useCustomCleanup: false)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        await reloadModels()
+        let full = menu()
+        let speech = full.items.first { $0.title.hasPrefix("Speech Model: ") }!.submenu!
+        let checked = speech.items.filter { $0.state == .on }
+        XCTAssertEqual(checked.count, 1)
+        XCTAssertEqual(checked.first?.title, "parakeet-tdt-0.6b-v3")
+        let cleanup = full.items.first { $0.title.hasPrefix("Clean Up Model: ") }!.submenu!
+        XCTAssertEqual(cleanup.items.filter { $0.state == .on }.count, 1)
+        XCTAssertEqual(cleanup.items.first?.state, .on, "cleanup is on Apple Native")
     }
 
     // MARK: - Choosing
