@@ -32,9 +32,13 @@ extension SessionController {
         guard generation == gen else { return }
         var raw = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         // A mic that never rose above the floor heard nothing, so anything the
-        // recognizer made of that noise must not be inserted.
+        // recognizer made of that noise must not be inserted. A service that
+        // says every segment was not speech has heard nothing too, even when
+        // the room was loud enough to clear the floor: a fan, traffic.
         let heardNothing = silentSessionOverride ?? capture.sessionWasFullySilent
-        if heardNothing || raw.isEmpty {
+        let serviceSaidNoSpeech = serviceHeardNoSpeech
+        if heardNothing || serviceSaidNoSpeech || raw.isEmpty {
+            serviceHeardNoSpeech = false   // spent with this session, whatever it said
             // A notice set for this session (the length limit) explains the
             // emptiness better than a generic line, so it wins here too.
             if modePickedThisSession {
@@ -43,7 +47,7 @@ extension SessionController {
             } else if let why = pendingNotice {
                 pendingNotice = nil
                 pill(.error(why.display(copied: false)), autoHideAfter: 3.5)
-            } else if heardNothing {
+            } else if heardNothing || serviceSaidNoSpeech {
                 let device = capture.activeDevice.map { " (device: \($0.name))" } ?? ""
                 pill(.error("Couldn't hear you. Check your mic\(device)."), autoHideAfter: 3.0)
             } else {

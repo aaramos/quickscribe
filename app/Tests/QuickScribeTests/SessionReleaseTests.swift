@@ -198,6 +198,79 @@ final class SessionReleaseTests: XCTestCase {
         XCTAssertNotEqual(session.pillLog.last, .error("Nothing captured"))
     }
 
+    // MARK: - A noisy room is not a dictation
+
+    /// The reported failure: a fan or traffic above the floor, nothing said,
+    /// and the service hands back "Thank you for watching." The service's own
+    /// verdict must stop it before the cleanup model or the document sees it.
+    func testNoSpeechVerdictFromTheServiceInsertsNothing() async {
+        chooseCustomSpeech()
+        armedClip()
+        service.queue(service.text(#"""
+        {"text":" Thank you for watching.","segments":[{"no_speech_prob":0.823,"text":" Thank you for watching."}]}
+        """#), forPath: "/v1/audio/transcriptions")
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = false
+        let live = StubSpeech(.words("Apple invented something."))
+        session.processRelease(customChosen: true, silent: false, live: live)
+        await waitUntil { self.session.pillLog.last != nil && self.session.pillLog.count > 0 }
+        // Give the insert path a moment to prove it never runs.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertNil(self.insertedAfter, "an invented phrase from a noisy room must never be typed")
+        XCTAssertTrue(self.copied.isEmpty, "and must not reach the clipboard either")
+        XCTAssertEqual(fakeCleaner.calls, 0, "the cleanup model is not asked to polish words nobody said")
+        guard case .error(let why)? = session.pillLog.last else { return XCTFail("\(String(describing: session.pillLog.last))") }
+        XCTAssertTrue(why.contains("Couldn't hear you"), why)
+        XCTAssertFalse(why.contains("Thank you"), "the notice must never repeat the invented words")
+    }
+
+    /// Real speech in the same clip shape is inserted exactly as before.
+    func testSpeechVerdictFromTheServiceStillInserts() async {
+        chooseCustomSpeech()
+        armedClip()
+        service.queue(service.text(#"""
+        {"text":"Let's meet at three.","segments":[{"no_speech_prob":0.004,"text":"Let's meet at three."}]}
+        """#), forPath: "/v1/audio/transcriptions")
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = true
+        let live = StubSpeech(.words("unused"))
+        session.processRelease(customChosen: true, silent: false, live: live)
+        await waitUntil { self.insertedAfter != nil }
+        XCTAssertEqual(self.insertedAfter, "Let's meet at three.")
+        XCTAssertGreaterThanOrEqual(fakeCleaner.calls, 1)
+    }
+
+    /// A service that sends no segments keeps the old behavior: words land.
+    func testAServiceWithoutTheFieldStillInserts() async {
+        chooseCustomSpeech()
+        armedClip()
+        okTranscription("Thank you.")
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = true
+        let live = StubSpeech(.words("unused"))
+        session.processRelease(customChosen: true, silent: false, live: live)
+        await waitUntil { self.insertedAfter != nil }
+        XCTAssertEqual(self.insertedAfter, "Thank you.",
+                       "no verdict from the service means no new rule; the floor and empty checks still decide")
+    }
+
+    /// The verdict belongs to one session: the next one starts clean.
+    func testTheNoSpeechVerdictIsSpentWithItsSession() async {
+        chooseCustomSpeech()
+        armedClip()
+        service.queue(service.text(#"{"text":" Thank you.","segments":[{"no_speech_prob":0.83}]}"#),
+                      forPath: "/v1/audio/transcriptions")
+        session.clock = { self.base }
+        session.releaseAt = base
+        session.appleModelReadyOverride = false
+        session.processRelease(customChosen: true, silent: false, live: StubSpeech(.words("unused")))
+        await waitUntil { self.session.pillLog.contains { if case .error = $0 { return true }; return false } }
+        XCTAssertTrue(session.serviceHeardNoSpeech == false, "read once, then cleared")
+    }
+
     // MARK: - Notices stay readable
 
     func testFailureNoticeShowsAfterTheWordsLand() async {

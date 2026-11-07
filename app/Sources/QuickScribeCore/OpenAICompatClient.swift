@@ -128,8 +128,31 @@ public struct OpenAICompatClient: Sendable {
 
     // MARK: - POST /audio/transcriptions
 
+    /// One clip's answer: the words, plus the service's own opinion about
+    /// whether anyone spoke. Services that know nothing about speech
+    /// detection simply leave `heardSpeech` true.
+    public struct Transcription: Sendable, Equatable {
+        public let text: String
+        /// False only when the service says NOTHING was spoken, on every
+        /// segment it reported. A service that sends no such field counts as
+        /// having heard speech: silence is then decided the old way.
+        public let heardSpeech: Bool
+    }
+
+    /// Above this, Whisper-style services are saying "this segment is not
+    /// speech". Room noise with no words scores about 0.83 to 0.85; real
+    /// speech scores about 0.004.
+    static let noSpeechThreshold = 0.6
+
     /// Multipart upload of a wav clip, with model and language fields.
     public func transcribe(wav: Data, model: String) async throws -> String {
+        try await transcribeDetailed(wav: wav, model: model).text
+    }
+
+    /// The same upload, keeping the service's no-speech verdict. The app's own
+    /// dictation path uses this one so an invented "Thank you." from a noisy
+    /// room never reaches the document.
+    public func transcribeDetailed(wav: Data, model: String) async throws -> Transcription {
         let url = try base.appendingPathComponent("audio/transcriptions")
         let boundary = "qs-\(UUID().uuidString)"
         var body = Data()
@@ -143,6 +166,9 @@ public struct OpenAICompatClient: Sendable {
         if !settings.language.isEmpty {
             append("--\(boundary)\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n\(settings.language)\r\n")
         }
+        // verbose_json is what carries per-segment no_speech_prob. A service
+        // that ignores it still answers with text, and then nothing is dropped.
+        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\nverbose_json\r\n")
         append("--\(boundary)--\r\n")
 
         let req = request(to: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
@@ -161,7 +187,24 @@ public struct OpenAICompatClient: Sendable {
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let text = json["text"] as? String else { throw EndpointError.invalidReply }
-        return text
+        return Transcription(text: text, heardSpeech: Self.heardSpeech(in: json))
+    }
+
+    /// The service's verdict, read only where it can be trusted. A reply with
+    /// no segments, or a segment without the field, gets the old behavior:
+    /// whatever came back is treated as words, and the app's other rules
+    /// (the silence floor, empty replies) still apply.
+    static func heardSpeech(in json: [String: Any]) -> Bool {
+        guard let segments = json["segments"] as? [[String: Any]], !segments.isEmpty else { return true }
+        var sawField = false
+        for segment in segments {
+            guard let probability = segment["no_speech_prob"] as? Double else {
+                return true                       // a service that does not say: no new rule
+            }
+            sawField = true
+            if probability <= noSpeechThreshold { return true }
+        }
+        return !sawField
     }
 
     // MARK: - POST /chat/completions (streaming)

@@ -216,6 +216,58 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertTrue(req.body.range(of: clip) != nil, "the whole clip must arrive as one file, unchanged")
     }
 
+    // MARK: - A noisy room is not speech
+
+    func testTranscriptionAsksForVerboseJSON() async throws {
+        service.queue(service.text(#"{"text":"Thank you.","segments":[]}"#), forPath: "/v1/audio/transcriptions")
+        _ = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        let body = String(decoding: try XCTUnwrap(service.lastRequest).body, as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"response_format\"\r\n\r\nverbose_json"), body)
+    }
+
+    func testNoSpeechVerdictIsReadOnlyWhenEverySegmentSaysSo() async throws {
+        // The real shape from the shared server's whisper, on a noisy clip.
+        let noisy = #"{"text":" Thank you.","segments":[{"no_speech_prob":0.846,"text":" Thank you."}],"language":"en"}"#
+        service.queue(service.text(noisy), forPath: "/v1/audio/transcriptions")
+        let reply = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertEqual(reply.text, " Thank you.")
+        XCTAssertFalse(reply.heardSpeech, "every segment above the threshold: nobody spoke")
+
+        // Real speech, same shape: heard.
+        let speech = #"{"text":"Let's meet at three.","segments":[{"no_speech_prob":0.004,"text":"Let's meet at three."}]}"#
+        service.queue(service.text(speech), forPath: "/v1/audio/transcriptions")
+        let heard = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertEqual(heard.text, "Let's meet at three.")
+        XCTAssertTrue(heard.heardSpeech)
+
+        // One segment heard means the clip had speech in it, whatever else was noise.
+        let mixed = #"{"text":"Um. Let's meet at three.","segments":[{"no_speech_prob":0.81},{"no_speech_prob":0.02}]}"#
+        service.queue(service.text(mixed), forPath: "/v1/audio/transcriptions")
+        let mixedReply = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertTrue(mixedReply.heardSpeech)
+    }
+
+    func testAServiceWithoutTheFieldKeepsTheOldBehavior() async throws {
+        // The plain {"text": ...} shape every OpenAI-compatible service answers.
+        service.queue(service.text(#"{"text":"fourteen hundred fifty"}"#), forPath: "/v1/audio/transcriptions")
+        let plain = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertTrue(plain.heardSpeech, "a service that sends no segments is never newly refused")
+        // Verbose, but a segment without the field: also untouched.
+        service.queue(service.text(#"{"text":"Thank you.","segments":[{"text":"Thank you."}]}"#),
+                      forPath: "/v1/audio/transcriptions")
+        let missing = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertTrue(missing.heardSpeech)
+        // An empty segment list is not evidence of silence either.
+        service.queue(service.text(#"{"text":"Thank you.","segments":[]}"#), forPath: "/v1/audio/transcriptions")
+        let empty = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertTrue(empty.heardSpeech)
+        // The plain transcribe call is unchanged for every existing caller.
+        service.queue(service.text(#"{"text":"plain words","segments":[{"no_speech_prob":0.9}]}"#),
+                      forPath: "/v1/audio/transcriptions")
+        let words = try await client.transcribe(wav: Data([1]), model: "speechy")
+        XCTAssertEqual(words, "plain words")
+    }
+
     func testTranscriptionEmptyReplyAndBadJSON() async throws {
         service.queue(service.text("{}"), forPath: "/v1/audio/transcriptions")
         await XCTAssertThrowsErrorAsync(try await self.client.transcribe(wav: Data([1]), model: "m")) {

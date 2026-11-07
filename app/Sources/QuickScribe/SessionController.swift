@@ -93,6 +93,10 @@ final class SessionController {
     /// Overrides the "the mic heard nothing all session" reading, which is
     /// always true while no real capture ever ran (tests drive releases).
     var silentSessionOverride: Bool?
+    /// Set when the service says nobody spoke into a clip the noise floor
+    /// could not refuse (a fan, traffic). Cleared with every new session, so
+    /// it can only describe the session it came from.
+    var serviceHeardNoSpeech = false
 
     /// Menu bar needs to know when sessions start/end (icon state, menu disable).
     var onPhaseChange: ((Bool) -> Void)?
@@ -221,8 +225,10 @@ final class SessionController {
             }
         }
         transcription = live
-        // A fresh session starts with no notice carried over.
+        // A fresh session starts with no notice carried over, and no verdict
+        // about the last one's noise.
         pendingNotice = nil
+        serviceHeardNoSpeech = false
         // Only a session whose speech route is the service keeps the whole
         // recording; Apple speech needs nothing beyond the live recognizer.
         armRecording()
@@ -333,10 +339,15 @@ final class SessionController {
                 // The key is read from the Keychain only for the route that
                 // actually sends anything.
                 let endpoint = OpenAICompatClient(settings: settings, apiKey: self.endpointStore.apiKey(), timeout: 120)
-                let raw = try await endpoint.transcribe(wav: bytes, model: settings.speechModel)
-                let words = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                let reply = try await endpoint.transcribeDetailed(wav: bytes, model: settings.speechModel)
+                let words = reply.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if words.isEmpty { throw EndpointError.emptyReply }   // blank is no words
                 guard self.generation == gen, !Task.isCancelled else { return }
+                // A noisy room is heard as "Thank you." by the service. It says
+                // so itself, on every segment; trust that instead of typing a
+                // phrase nobody dictated. Services without the field are
+                // unaffected and keep the old behavior.
+                self.serviceHeardNoSpeech = !reply.heardSpeech
                 // Cleanup's budget starts when the words are in hand. The
                 // upload got its own 120 s; it spends none of this one.
                 self.releaseAt = self.clock()
