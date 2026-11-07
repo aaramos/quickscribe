@@ -123,6 +123,41 @@ final class CleanupGuardTests: XCTestCase {
         XCTAssertTrue(ok("Some words were spoken aloud today.", "Some words were said.", "rewrite"))
         XCTAssertFalse(ok("It rose 40 percent.", "It rose a lot.", "rewrite"))
     }
+    func testACorrectionCarriesTheSpokenMoneyToTheAmountTheSpeakerMeant() {
+        // The reported failure, end to end from what Apple's speech wrote: the
+        // model cleaned it correctly, and the guard refused the corrected
+        // amount because its own number had no dollar sign in the input.
+        let heard = "The invoice total is $1,200. Actually, 1450. Do Friday."
+        let cleaned = "The invoice total is $1,450, due Friday."
+        XCTAssertTrue(ok(cleaned, heard), "the corrected amount keeps the money the speaker said")
+        XCTAssertFalse(CleanupGuard.inventsCurrency(output: cleaned, input: heard))
+
+        // Every correction word the proposal names does the same linking.
+        for correction in ["actually", "I mean", "sorry", "no"] {
+            let input = "the invoice total is $1,200, \(correction) 1450"
+            XCTAssertTrue(ok("The invoice total is $1,450.", input),
+                          "\(correction) links the two amounts")
+        }
+        // Money said as a word travels across the correction too.
+        XCTAssertTrue(ok("The invoice total is $1,450.", "the invoice total is 1,200 dollars, actually 1450"))
+
+        // Still refused: the sign on a number no correction links.
+        XCTAssertFalse(ok("The invoice total is $1,200 for $14 people.", "the invoice total is $1,200 for 14 people"),
+                       "an unrelated number must not collect a dollar sign, even in the same sentence")
+        XCTAssertFalse(ok("The invoice total is $1,200. Actually, €1,450.", "the invoice total is $1,200, actually 1450"),
+                       "the correction may keep the money said, never change it")
+        XCTAssertFalse(ok("The quote was $1,450.", "the quote was 1,200, actually 1450"),
+                       "no money was said anywhere, so the sign is still invented")
+        XCTAssertFalse(ok("The quote was $1,200, and $1,450.", "the quote was $1,200, and 1450"),
+                       "and is not a correction word")
+        XCTAssertFalse(ok("$1,200 for $14 people.", "the invoice total is $1,200 for 14 people"),
+                       "a number joined by other words is not a correction of the amount")
+        XCTAssertFalse(ok("$1,200 or $14 a head.", "the invoice total is $1,200 or 14 a head"),
+                       "or is not a correction word either")
+        XCTAssertFalse(ok("The quote was $1,300.", "the quote was $1,200, actually 1450, actually 1300"),
+                       "a second correction is not trusted: the model was told three amounts")
+    }
+
     func testGuardRefusesACurrencyTheSpeakerNeverNamed() {
         XCTAssertFalse(CleanupGuard.accepts(output: "Revenue was $4.2 million last quarter.",
                                             input: "revenue was 4.2 million last quarter", mode: "polish"),
@@ -229,10 +264,13 @@ final class CleanupGuardTests: XCTestCase {
             output: "$5 for the fee, room number is $212.",
             input: "the fee is 5 dollars and the room number is 212", mode: "polish"),
             "dollars on the fee do not license a sign on the room number")
-        // Doubt refuses too: the sign moved between self-corrected numbers.
-        XCTAssertFalse(CleanupGuard.accepts(
+        // The speaker's own correction carries the money marker across: the
+        // corrected amount is the one they meant, and a number keeps the sign
+        // it was said with even when the engine wrote the first one as a sign.
+        XCTAssertTrue(CleanupGuard.accepts(
             output: "The quote was $1,450.",
-            input: "the quote was $1,200, actually 1450", mode: "polish"))
+            input: "the quote was $1,200, actually 1450", mode: "polish"),
+            "the correction word links the two amounts, so the sign they said belongs to the one they meant")
         // Still fine: the number the speaker gave in money words or signs.
         XCTAssertTrue(CleanupGuard.accepts(output: "$4.2 million last quarter.",
                                            input: "4.2 million dollars last quarter", mode: "polish"))

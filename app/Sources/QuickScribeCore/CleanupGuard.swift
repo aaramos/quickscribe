@@ -266,16 +266,110 @@ public enum CleanupGuard {
 
     /// A dollar sign, or a money word, must ride the number that was spoken
     /// with money: an answer's "212 dollars" is a claim just as much as
-    /// "212€" or "$212" is.
+    /// "212€" or "$212" is. One exception, because it is the speaker's own
+    /// correction: when the text before a number names the amount in money and
+    /// a correction word joins the two ("$1,200, actually 1450"), the corrected
+    /// amount may take that same marker. Nothing else is inherited.
     static func inventsCurrency(output: String, input: String) -> Bool {
         let marked = numerals(in: output).filter { hasSymbolOn($0) || currencyWordAfter($0) }
         guard !marked.isEmpty else { return false }
         let given = numerals(in: input)
+        let corrected = moneyInheritedAcrossCorrections(in: input)
         return marked.contains { n in
-            !given.contains { m in
+            if given.contains(where: { m in
                 m.digits == n.digits && (hasSymbolOn(m) || currencyWordAfter(m))
-            }
+            }) { return false }
+            // A corrected amount may wear a marker its own number was not said
+            // with, but only the marker of the amount it replaces, and only
+            // that one: "$1,200, actually 1450" cannot become "€1,450".
+            guard let inherited = corrected[n.digits] else { return true }
+            return !moneyMarkers(n).isSubset(of: inherited)
         }
+    }
+
+    /// Every marker on one number as a currency, never as a shape: "$" and
+    /// "dollars" are the same money, and "$" and "€" are not. That way a
+    /// corrected amount may keep the money it was said with, and the model
+    /// still cannot turn dollars into euros while it is correcting itself.
+    private static func moneyMarkers(_ n: Numeral) -> Set<String> {
+        var markers: Set<String> = []
+        if let before = n.head.last(where: { !$0.isWhitespace }), isSymbol(before) {
+            markers.insert(currency(before))
+        }
+        if let after = n.tail.first(where: { !$0.isWhitespace }), isSymbol(after) {
+            markers.insert(currency(after))
+        }
+        let token = String(n.tail.drop { $0.isWhitespace }.prefix { $0.isLetter })
+        if currencyWords.contains(token) { markers.insert(currency(token)) }
+        return markers
+    }
+
+    /// Which money a marker names. A word with no group of its own stands for
+    /// itself, so the comparison never guesses: unknown money matches only its
+    /// own spelling.
+    private static func currency(_ marker: Character) -> String {
+        if let identity = symbolCurrencies[marker] { return identity }
+        return currency(String(marker))
+    }
+
+    private static func currency(_ marker: String) -> String {
+        wordCurrencies[marker.lowercased()] ?? marker.lowercased()
+    }
+
+    private static let symbolCurrencies: [Character: String] = ["$": "usd", "€": "eur", "£": "gbp", "¥": "jpy", "₹": "inr"]
+    private static let wordCurrencies: [String: String] = [
+        "dollar": "usd", "dollars": "usd", "buck": "usd", "bucks": "usd", "usd": "usd",
+        "euro": "eur", "euros": "eur", "eur": "eur",
+        "pound": "gbp", "pounds": "gbp", "gbp": "gbp",
+        "yen": "jpy", "jpy": "jpy",
+        "yuan": "cny", "rmb": "cny",
+        "rupee": "inr", "rupees": "inr", "inr": "inr",
+        "franc": "chf", "francs": "chf", "chf": "chf",
+        "peso": "mxn", "pesos": "mxn", "krona": "sek", "kronor": "sek", "krone": "nok", "kroner": "nok",
+        "bitcoin": "btc", "bitcoins": "btc", "cad": "cad", "aud": "aud",
+        "cent": "cent", "cents": "cent", "penny": "cent", "pennies": "cent",
+    ]
+
+    private static let correctionWords: Set<String> = ["actually", "sorry", "no"]
+
+    /// The amount a correction is moving to, and the markers of the amount it
+    /// replaces: "the total is $1,200, actually 1450" inherits the sign for
+    /// "1450". Only the number right before the correction word carries over,
+    /// so a long chain falls back to the speaker's own words.
+    private static func moneyInheritedAcrossCorrections(in text: String) -> [String: Set<String>] {
+        let numbers = numerals(in: text)
+        guard numbers.count > 1 else { return [:] }
+        let lower = text.lowercased()
+        var inherited: [String: Set<String>] = [:]
+        for index in numbers.indices.dropLast() {
+            let replaced = numbers[index], corrected = numbers[index + 1]
+            let markers = moneyMarkers(replaced)
+            guard !markers.isEmpty else { continue }
+            // The gap runs from the end of one number to the start of the next.
+            // A Numeral's head always ends exactly where its number begins.
+            let gap = lower[replaced.end..<corrected.head.endIndex]
+            guard joinsACorrection(gap) else { continue }
+            inherited[corrected.digits, default: []].formUnion(markers)
+        }
+        return inherited
+    }
+
+    /// A correction word standing between two amounts, and nothing else that
+    /// could carry meaning: "actually", "sorry", "no", "I mean". A gap with
+    /// other words in it ("for 14 people, no") is not a correction of the
+    /// amount, and doubt falls back to the speaker's own words.
+    private static func joinsACorrection(_ gap: Substring) -> Bool {
+        var tokens = words(String(gap))
+        // The connective a person actually says around a correction, and the
+        // punctuation the words() split throws away anyway. The money word
+        // that follows the replaced amount ("1,200 dollars, actually 1450")
+        // is part of that amount, not part of the gap.
+        let filler: Set<String> = Set(["and", "but", "or", "it", "is", "was", "the", "a", "an", "that", "this", "of"])
+            .union(currencyWords)
+        tokens.removeAll { filler.contains($0) }
+        guard !tokens.isEmpty else { return false }
+        if tokens == ["i", "mean"] { return true }
+        return tokens.count == 1 && correctionWords.contains(tokens[0])
     }
 
     /// A model that has seen "three on Friday" loves to hand back "3 p.m."
