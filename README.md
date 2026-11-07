@@ -47,7 +47,9 @@ short notice on screen, and the menu grows an "Update available: version X" item
 opens that release's page; the menu bar icon itself does not change. The notice never
 interrupts a dictation: if you are recording, it waits for a quiet moment. The app never
 downloads or installs anything itself: you drag the new disk image to Applications when
-you choose. After an update macOS may ask for Microphone and Accessibility again; switch
+you choose. Coming from version 1.0, the old app is named QuickScribe Native, not
+QuickScribe: after installing this version, quit QuickScribe Native and drag it to the
+Trash, or you will have both apps. After an update macOS may ask for Microphone and Accessibility again; switch
 them back on if the hotkeys go quiet. If a switch already looks on but the hotkeys are
 dead, remove QuickScribe from that list with the minus button and add it again. Your settings and edited prompts survive the update. Releases carry one steady self-made signature, so an update is the same app to macOS; coming from v1.0, which had a throwaway signature, means granting permissions again once, whatever the signature.
 

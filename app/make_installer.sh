@@ -43,8 +43,10 @@ short notice on screen and the menu grows an "Update available: version X" item 
 links to the release page; the icon itself does not change. The app never downloads or
 installs anything itself. To update: quit the app, download
 the new disk image from the release page, drag the app to Applications to replace the
-old one, and reopen. Releases share one steady self-made signature, so an update is the
-same app to macOS. macOS may still ask for Microphone and Accessibility after an update:
+old one, and reopen. Coming from version 1.0, the old app is named QuickScribe Native,
+not ${APP_NAME}: after installing this version, quit QuickScribe Native and drag it to
+the Trash, or you will have both apps. Releases share one steady self-made signature,
+so an update is the same app to macOS. macOS may still ask for Microphone and Accessibility after an update:
 switch them back on if the hotkeys stop working. If a switch already looks on but the
 hotkeys are dead, remove ${APP_NAME} from that list with the minus button and add it
 again. Coming from version 1.0, which had a throwaway signature, expect to
