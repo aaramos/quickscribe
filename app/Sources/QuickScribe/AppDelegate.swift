@@ -43,11 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = MenuBarIcon.image()
         statusItem.button?.image?.size = NSSize(width: 22, height: 22)
         statusItem.button?.toolTip = AppInfo.displayName
-        rebuildMenu()
 
         wireMenuActions()
-        modelStore.onRefreshFinished = { [weak self] in self?.refreshLanded() }
-        modelStore.refreshIfUseful()   // beside the app, never before it
+        // The store is told where answers go and starts fetching before the
+        // first menu is built, or that menu shows a false empty list.
+        MenuLaunch.start(store: modelStore,
+                         onRefreshFinished: { [weak self] in self?.refreshLanded() },
+                         buildMenu: { [weak self] in self?.rebuildMenu() })
         settingsWindow.onConnectionChanged = { [weak self] addressChanged, keyChanged in
             guard let self else { return }
             if addressChanged { self.modelStore.addressChanged() }

@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import QuickScribe
 import QuickScribeCore
@@ -333,6 +334,62 @@ final class MenuModelStoreTests: XCTestCase {
         await waitUntil { models.unreachable }
         XCTAssertEqual(models.lastFailure, .timedOut)
         XCTAssertEqual(models.speechModels, ["w"], "the timing out server costs its list nothing")
+    }
+
+    // MARK: - AA1: the launch order
+
+    /// The order the app launches in. If the lines are moved back, the first
+    /// menu is built with no request out and no models, and this fails.
+    func testTheFirstMenuIsBuiltWhileCheckingNotEmpty() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "", useCustomSpeech: false)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.setDelay(0.4)                     // a slow server, the worst case
+        caller.answer(.success([ModelEntry(id: "whisper-x", modelType: "audio_stt"),
+                                ModelEntry(id: "tidy-y", modelType: "vlm")]))
+        let models = makeStore(caller)
+
+        var firstMenu: MenuModelStore.Snapshot?
+        var landed = 0
+        MenuLaunch.start(store: models,
+                         onRefreshFinished: { landed += 1 },
+                         buildMenu: { firstMenu = models.snapshot() })
+        let opened = firstMenu
+        XCTAssertNotNil(opened)
+        XCTAssertTrue(opened!.speech.checking, "the first menu must say it is checking, not that there are no models")
+        XCTAssertFalse(opened!.speech.unreachable)
+        await waitUntil { landed == 1 }
+        XCTAssertEqual(models.snapshot().speech.entries, ["Apple Native", "whisper-x"],
+                       "and the answer that lands rebuilds into the real list")
+    }
+
+    /// The same order, but the app's own menu: no false "no speech models"
+    /// line in the very first menu a person can open.
+    func testTheVeryFirstMenuNeverSaysThereAreNoModels() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "", useCustomSpeech: false)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.setDelay(0.3)
+        caller.answer(.success([ModelEntry(id: "whisper-x", modelType: "audio_stt")]))
+        let models = makeStore(caller)
+        let app = MainMenuAssembly()
+        var first: NSMenu?
+        MenuLaunch.start(store: models,
+                         onRefreshFinished: {},
+                         buildMenu: {
+                             let settings = self.store.load()
+                             first = app.build(MainMenuAssembly.State(
+                                 hotkeysOff: false, cleanupProblem: nil, recording: false, profile: "polish",
+                                 snapshot: models.snapshot(), updateVersion: nil,
+                                 speechModel: settings.speechModel, cleanupModel: settings.cleanupModel))
+                         })
+        let menu = try! XCTUnwrap(first)
+        let speech = try! XCTUnwrap(menu.items.first { $0.title.hasPrefix("Speech Model: ") }?.submenu)
+        XCTAssertTrue(speech.items.contains { $0.title == MainMenuBuilder.checkingNote })
+        XCTAssertFalse(speech.items.contains { $0.title == MainMenuBuilder.noSpeechModelsNote },
+                       "the false line must never be in the first menu")
     }
 
     // MARK: - Y4: the Keychain
