@@ -152,9 +152,39 @@ public struct OpenAICompatClient: Sendable {
     /// The same upload, keeping the service's no-speech verdict. The app's own
     /// dictation path uses this one so an invented "Thank you." from a noisy
     /// room never reaches the document.
+    ///
+    /// Some services refuse the detailed reply outright (OpenAI's
+    /// gpt-4o-transcribe family is reported to answer HTTP 400, and a gateway
+    /// can answer an opaque 400 too). For them this is the one retry: exactly
+    /// once, immediately, with no response_format at all. Its answer is
+    /// treated as a service that sends no no-speech field, so `heardSpeech` is
+    /// true and the app's other rules (the silence floor, empty replies) still
+    /// decide. Nothing else is retried: 401, 403, 404, 429, 5xx and transport
+    /// failures surface as they are, and a second 400 surfaces too.
     public func transcribeDetailed(wav: Data, model: String) async throws -> Transcription {
         let url = try base.appendingPathComponent("audio/transcriptions")
-        let boundary = "qs-\(UUID().uuidString)"
+        let first = Self.uploadBody(wav: wav, model: model, language: settings.language,
+                                    responseFormat: "verbose_json",
+                                    boundary: "qs-\(UUID().uuidString)")
+        do {
+            return try await upload(first.body, boundary: first.boundary, to: url)
+        } catch let failure as EndpointError {
+            guard failure == .serverError(400) else { throw failure }
+            // The service will not take the field. Ask again the plain way,
+            // and read its reply as one without a verdict.
+            let retry = Self.uploadBody(wav: wav, model: model, language: settings.language,
+                                        responseFormat: nil,
+                                        boundary: "qs-\(UUID().uuidString)")
+            let plain = try await upload(retry.body, boundary: retry.boundary, to: url)
+            return Transcription(text: plain.text, heardSpeech: true)
+        }
+    }
+
+    /// The multipart body for one upload. The response_format part is only
+    /// written when asked for, so the retry is byte-for-byte the request every
+    /// older build sent.
+    static func uploadBody(wav: Data, model: String, language: String,
+                           responseFormat: String?, boundary: String) -> (body: Data, boundary: String) {
         var body = Data()
         func append(_ s: String) { body.append(Data(s.utf8)) }
         append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
@@ -163,15 +193,23 @@ public struct OpenAICompatClient: Sendable {
         if !model.isEmpty {
             append("--\(boundary)\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n\(model)\r\n")
         }
-        if !settings.language.isEmpty {
-            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n\(settings.language)\r\n")
+        if !language.isEmpty {
+            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n\(language)\r\n")
         }
         // verbose_json is what carries per-segment no_speech_prob. A service
         // that ignores it still answers with text, and then nothing is dropped.
-        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\nverbose_json\r\n")
+        if let responseFormat {
+            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\n\(responseFormat)\r\n")
+        }
         append("--\(boundary)--\r\n")
+        return (body, boundary)
+    }
 
-        let req = request(to: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+    /// One upload, classified. Both the first try and the retry go through
+    /// here, so a retry can never be made twice or on the wrong error.
+    private func upload(_ body: Data, boundary: String, to url: URL) async throws -> Transcription {
+        let req = request(to: url, method: "POST", body: body,
+                          contentType: "multipart/form-data; boundary=\(boundary)")
         let data: Data
         do {
             let (d, response) = try await session.data(for: req)

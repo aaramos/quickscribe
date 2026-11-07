@@ -225,6 +225,90 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertTrue(body.contains("name=\"response_format\"\r\n\r\nverbose_json"), body)
     }
 
+    // MARK: - A service that refuses the detailed reply
+
+    /// OpenAI's gpt-4o-transcribe family (and an opaque gateway) answers HTTP
+    /// 400 to response_format. The plain request is the one every earlier
+    /// build sent, so it must still work, and its answer has no verdict.
+    func testRefusedFormatRetriesOncePlainAndReturnsTheText() async throws {
+        service.queue(service.text(#"{"error":{"message":"response_format is not supported"}}"#, status: 400),
+                      forPath: "/v1/audio/transcriptions")
+        service.queue(service.text(#"{"text":"the plain reply"}"#), forPath: "/v1/audio/transcriptions")
+        let reply = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertEqual(reply.text, "the plain reply")
+        XCTAssertTrue(reply.heardSpeech, "a reply without the field can never be dropped on it")
+        XCTAssertEqual(service.received.count, 2, "exactly one retry")
+        let first = String(decoding: try XCTUnwrap(service.received.first).body, as: UTF8.self)
+        let second = String(decoding: try XCTUnwrap(service.received.last).body, as: UTF8.self)
+        XCTAssertTrue(first.contains("name=\"response_format\"\r\n\r\nverbose_json"), first)
+        XCTAssertFalse(second.contains("response_format"), "the retry must not ask for the format again: \(second)")
+        XCTAssertTrue(second.contains("name=\"model\"\r\n\r\nspeechy"), "the retry is otherwise the same request")
+        XCTAssertTrue(second.contains("name=\"language\""), second)
+        XCTAssertTrue(second.contains("filename=\"audio.wav\""), second)
+    }
+
+    /// The two uploads carry different boundaries: each body is assembled on
+    /// its own, so the retry cannot reuse a header that describes the first.
+    func testTheRetryUsesItsOwnBoundary() async throws {
+        service.queue(service.text("{}", status: 400), forPath: "/v1/audio/transcriptions")
+        service.queue(service.text(#"{"text":"ok"}"#), forPath: "/v1/audio/transcriptions")
+        _ = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        let first = try XCTUnwrap(service.received.first)
+        let second = try XCTUnwrap(service.received.last)
+        func boundaryOf(_ req: FakeService.Received) -> String {
+            let body = String(decoding: req.body, as: UTF8.self)
+            return body.components(separatedBy: "\r\n").first.map { String($0.dropFirst(2)) } ?? ""
+        }
+        XCTAssertEqual(first.headers["content-type"], "multipart/form-data; boundary=\(boundaryOf(first))")
+        XCTAssertEqual(second.headers["content-type"], "multipart/form-data; boundary=\(boundaryOf(second))")
+        XCTAssertNotEqual(boundaryOf(first), boundaryOf(second))
+    }
+
+    func testASecondRefusalSurfacesAfterExactlyTwoRequests() async throws {
+        for _ in 0..<2 { service.queue(service.text(#"{"error":"bad"}"#, status: 400), forPath: "/v1/audio/transcriptions") }
+        await XCTAssertThrowsErrorAsync(try await self.client.transcribeDetailed(wav: Data([1]), model: "speechy")) {
+            XCTAssertEqual($0 as? EndpointError, .serverError(400))
+        }
+        XCTAssertEqual(service.received.count, 2, "never a third attempt")
+    }
+
+    func testOtherStatusesAreNeverRetried() async throws {
+        // A second request would show up as a second recorded upload.
+        let expected: [Int: EndpointError] = [401: .unauthorized, 403: .unauthorized,
+                                             404: .notFound("transcription"),
+                                             429: .serverError(429),
+                                             500: .serverError(500), 503: .serverError(503)]
+        for status in [401, 403, 404, 429, 500, 503] {
+            service.reset(path: "/v1/audio/transcriptions")
+            let before = service.received.filter { $0.path.contains("transcriptions") }.count
+            service.queue(service.text("{}", status: status), forPath: "/v1/audio/transcriptions")
+            await XCTAssertThrowsErrorAsync(try await self.client.transcribeDetailed(wav: Data([1]), model: "speechy")) {
+                XCTAssertEqual($0 as? EndpointError, expected[status], "\(status) must surface as its own error")
+            }
+            let after = service.received.filter { $0.path.contains("transcriptions") }.count
+            XCTAssertEqual(after - before, 1, "\(status) is sent exactly one request")
+        }
+    }
+
+    /// A transport failure is not a refusal and must not become a second
+    /// request: the client reports it and stops.
+    func testATransportFailureIsNotRetried() async throws {
+        let dead = OpenAICompatClient(settings: EndpointSettings(address: "http://127.0.0.1:1/v1"),
+                                      apiKey: nil, timeout: 0.5)
+        await XCTAssertThrowsErrorAsync(try await dead.transcribeDetailed(wav: Data([1]), model: "m")) {
+            XCTAssertTrue(($0 as? EndpointError)?.message.hasPrefix("Could not reach the address.") ?? false, "\($0)")
+        }
+    }
+
+    func testANormalReplyIsOnlyOneRequest() async throws {
+        service.queue(service.text(#"{"text":"first try works","segments":[{"no_speech_prob":0.01}]}"#),
+                      forPath: "/v1/audio/transcriptions")
+        let reply = try await client.transcribeDetailed(wav: Data([1]), model: "speechy")
+        XCTAssertEqual(reply.text, "first try works")
+        XCTAssertTrue(reply.heardSpeech)
+        XCTAssertEqual(service.received.count, 1)
+    }
+
     func testNoSpeechVerdictIsReadOnlyWhenEverySegmentSaysSo() async throws {
         // The real shape from the shared server's whisper, on a noisy clip.
         let noisy = #"{"text":" Thank you.","segments":[{"no_speech_prob":0.846,"text":" Thank you."}],"language":"en"}"#
