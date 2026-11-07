@@ -91,6 +91,8 @@ refuses to record and says why.
 4. **Your words always arrive.** If the model refuses, takes too long, is unavailable or
    fails the check, the tidied text is inserted and the overlay says so.
 
+Apple's on-device cleanup may leave some self-corrections in, and a custom service may handle them better.
+
 If nothing that accepts text has focus, the cleaned-up text goes on the clipboard instead
 and the overlay says so. With Apple's models (the default) dictated text never leaves the
 Mac, never goes in the logs, and isn't saved: there is no history. If you set a custom
