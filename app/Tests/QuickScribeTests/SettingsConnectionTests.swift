@@ -85,6 +85,105 @@ final class SettingsConnectionTests: XCTestCase {
         XCTAssertEqual(announced.first?.0, false, "no new address, so the list is not thrown away")
     }
 
+    /// Z3: the real first-time order. The address is typed first, which reads
+    /// the key once and finds none; the key is typed second, and the next fetch
+    /// must carry it. Before this fix the second step was reported as no change,
+    /// so a key-protected server listed no models until the app restarted.
+    func testTheKeyTypedAfterTheAddressIsReportedAsAChange() throws {
+        var announced: [(Bool, Bool)] = []
+        settings.onConnectionChanged = { announced.append(($0, $1)) }
+
+        addressField.stringValue = service.baseURL
+        commit(addressField)
+        XCTAssertEqual(announced.last?.0, true, "the address changed")
+        XCTAssertEqual(announced.last?.1, false, "no key was typed yet")
+
+        keyField.stringValue = "sk-first-key"
+        commit(keyField)
+        XCTAssertEqual(announced.last?.0, false, "the address did not change")
+        XCTAssertEqual(announced.last?.1, true, "the key did change: the fetch must use it")
+    }
+
+    func testReplacingTheKeyIsAChangeAndSavingTheSameKeyIsNot() throws {
+        keyField.stringValue = "sk-one"
+        commit(keyField)
+        var announced: [(Bool, Bool)] = []
+        settings.onConnectionChanged = { announced.append(($0, $1)) }
+        keyField.stringValue = "sk-two"
+        commit(keyField)
+        XCTAssertEqual(announced.last?.1, true, "a different key is a change")
+        keyField.stringValue = "sk-two"
+        commit(keyField)
+        XCTAssertEqual(announced.last?.1, false, "the same key again is not")
+        keyField.stringValue = "   "
+        commit(keyField)
+        XCTAssertEqual(announced.last?.1, true, "clearing the key is a change")
+    }
+
+    /// End to end through the menu's own store: address first, then the key,
+    /// and the fetch after the key really carries it.
+    func testTheModelFetchAfterAKeyTypedLaterUsesThatKey() async throws {
+        final class Counter: SecretStoring, @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: String?
+            private var reads = 0
+            init(_ v: String? = nil) { value = v }
+            func secret() -> String? { lock.lock(); reads += 1; let v = value; lock.unlock(); return v }
+            func setSecret(_ v: String?) throws { lock.lock(); value = v; lock.unlock() }
+            var readCount: Int { lock.lock(); defer { lock.unlock() }; return reads }
+        }
+        let counter = Counter()
+        let store = EndpointSettingsStore(defaults: defaults, secrets: counter)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("prompts.json")
+        let window = SettingsWindow(library: PromptLibrary(fileURL: url), endpointStore: store)
+        window.show()
+        defer { window.window?.close() }
+        let root = try XCTUnwrap(window.window?.contentView)
+        let address = try XCTUnwrap(all(NSTextField.self, in: root).first { $0.placeholderString == "http://192.168.1.20:1234/v1" })
+        let key = try XCTUnwrap(all(NSSecureTextField.self, in: root).first)
+
+        final class Box: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [(String, String?)] = []
+            func add(_ settings: EndpointSettings, _ key: String?) { lock.lock(); items.append((settings.address, key)); lock.unlock() }
+            var seen: [(String, String?)] { lock.lock(); defer { lock.unlock() }; return items }
+        }
+        let box = Box()
+        let models = MenuModelStore(endpointStore: store) { settings, key in
+            box.add(settings, key)
+            return .success([ModelEntry(id: "whisper-x", modelType: "audio_stt")])
+        }
+        window.onConnectionChanged = { addressChanged, keyChanged in
+            if addressChanged { models.addressChanged() }
+            if keyChanged { models.keyChanged() }
+            models.refreshIfUseful()
+        }
+
+        address.stringValue = service.baseURL
+        address.sendAction(address.action!, to: address.target)
+        for _ in 0..<100 where models.speechModels.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(box.seen.count, 1)
+        XCTAssertNil(box.seen.first?.1, "no key yet, so the fetch carries none")
+
+        // The promise is about the menu's own fetch: one read per change, not
+        // one per menu open. The Settings page's own echo of the key is separate.
+        let readsBefore = counter.readCount
+        key.stringValue = "sk-late-key"
+        key.sendAction(key.action!, to: key.target)
+        for _ in 0..<100 where box.seen.count < 2 { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(box.seen.count, 2, "a key typed later asks the server again")
+        XCTAssertEqual(box.seen.last?.1, "sk-late-key", "and carries the key")
+        XCTAssertLessThan(counter.readCount - readsBefore, 6, "a key change does not read per fetch")
+        // The promise that matters: opening the menu again does not read it again.
+        let readsAfterChange = counter.readCount
+        for _ in 0..<4 {
+            models.refreshIfUseful()
+            try await Task.sleep(nanoseconds: 120_000_000)
+        }
+        XCTAssertEqual(counter.readCount, readsAfterChange,
+                       "four more menu opens, zero more Keychain reads")
+    }
+
     func testKeyGoesToSecretStoreNotPreferences() throws {
         keyField.stringValue = "sk-window-secret"
         commit(keyField)

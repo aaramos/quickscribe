@@ -28,7 +28,11 @@ extension SettingsWindow {
 
     private func connectionChanged(saveKey: Bool = false) {
         let before = endpointStore.load()
-        let hadKey = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : keyField.stringValue
+        // The stored key as it was. A key edit must be judged by what the store
+        // holds before and after, never by the field it was just written from:
+        // that comparison is always equal, so a new key was never noticed, and
+        // the model fetch kept using none until the app restarted.
+        let keyBefore = endpointStore.apiKey()
         let s = collectConnection()
         endpointStore.save(s)
         if saveKey {
@@ -39,7 +43,8 @@ extension SettingsWindow {
             }
         }
         let addressChanged = before.normalizedAddress != s.normalizedAddress
-        let keyChanged = saveKey && (endpointStore.apiKey() != nil) != (hadKey != nil)
+        let keyNow = endpointStore.apiKey()
+        let keyChanged = saveKey && keyNow != keyBefore
         refreshWordsOutWarning()
         // The prompt editor shows the factory of the route cleanup now uses.
         // Unsaved typing stays put (showCurrentMode keeps dirty drafts).

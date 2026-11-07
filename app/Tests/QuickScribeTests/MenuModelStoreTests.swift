@@ -217,6 +217,34 @@ final class MenuModelStoreTests: XCTestCase {
         XCTAssertEqual(after.speech.entries, ["Apple Native", "w"])
     }
 
+    /// Z3: a refused key is not an unreachable server. The menu says which.
+    func testARefusedKeyIsNamedAsItsOwnProblem() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "w", useCustomSpeech: true)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.answer(.failure(.unauthorized))
+        let models = makeStore(caller)
+        models.refreshIfUseful()
+        await waitUntil { models.lastFailure != nil }
+        let snap = models.snapshot()
+        XCTAssertTrue(snap.speech.keyRefused, "the menu must say the key was refused")
+        XCTAssertFalse(snap.speech.unreachable, "the server answered; it was the key")
+        XCTAssertFalse(snap.speech.checking)
+    }
+
+    func testAnUnreachableServerIsNotReportedAsARefusedKey() async {
+        var s = EndpointSettings(address: "http://127.0.0.1:1234/v1", speechModel: "w", useCustomSpeech: true)
+        s.language = EndpointSettings.deviceLanguage
+        store.save(s)
+        let caller = Caller()
+        caller.answer(.failure(.notReached("offline")))
+        let models = makeStore(caller)
+        models.refreshIfUseful()
+        await waitUntil { models.unreachable }
+        XCTAssertFalse(models.snapshot().speech.keyRefused)
+    }
+
     // MARK: - Y4: freshness without waiting
 
     func testTheMenuNeverWaitsForTheServer() async {

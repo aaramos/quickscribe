@@ -108,15 +108,16 @@ final class MenuModelStore {
         let missing = usesService && !chosen.isEmpty && !models.contains(chosen) ? chosen : nil
         if let missing { entries.append(missing) }
         // Before any answer has come, the menu says it is checking rather than
-        // claiming the server has no models. A refusal is named as itself.
-        let nothingKnown = models.isEmpty && missing == nil
+        // claiming the server has no models. A refusal is named as itself, and
+        // is not the same thing as a server that cannot be reached.
+        let nothingKnown = models.isEmpty
         let refused: Bool
         if case .unauthorized? = lastFailure { refused = true } else { refused = false }
         return Route(entries: entries,
-                     unreachable: unreachable,
+                     unreachable: unreachable && !refused,
                      missingChoice: missing,
                      checking: nothingKnown && fetching,
-                     keyRefused: nothingKnown && refused)
+                     keyRefused: refused)
     }
 
     // MARK: - Keeping it fresh
