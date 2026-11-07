@@ -325,7 +325,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.menuIsOpen = false
                 guard self.rebuildAfterClose else { return }
                 self.rebuildAfterClose = false
-                self.rebuildMenu()
+                // Every open starts a refresh, so nearly every click comes
+                // through here. AppKit's order between this and the clicked
+                // item's action is not certain, so the rebuild waits for the
+                // next main-queue turn rather than racing that action.
+                DispatchQueue.main.async { [weak self] in self?.rebuildMenu() }
             })
     }
 

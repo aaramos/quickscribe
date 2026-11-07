@@ -348,6 +348,39 @@ final class MenuBarMenuTests: XCTestCase {
         }
     }
 
+    // MARK: - AA4: a close is never missed
+
+    /// A rebuild while a menu is open installs a new menu. The close then comes
+    /// for the menu that actually opened, and must still be recognised: before
+    /// this fix the comparison was against the latest built menu, so that close
+    /// was dropped and the app kept believing a menu was open.
+    func testACloseIsRecognisedAfterARebuildWhileTheMenuWasOpen() {
+        _ = menu()
+        let m1 = try! XCTUnwrap(app.builtMenu)
+        app.menuWillOpen(m1)
+        XCTAssertEqual(actions.opened, 1)
+        _ = menu()                                   // rebuilt while m1 is on screen
+        XCTAssertNotEqual(app.builtMenu, m1, "the rebuild really installed a different menu")
+        app.menuDidClose(m1)                         // the person closes what they saw
+        XCTAssertEqual(actions.closed, 1, "that close must be recognised and reported")
+        XCTAssertNil(app.openMenu, "and no menu is left marked open")
+
+        // The next cycle still works, which is what "stuck open" used to break.
+        let m2 = try! XCTUnwrap(app.builtMenu)
+        app.menuWillOpen(m2)
+        app.menuDidClose(m2)
+        XCTAssertEqual(actions.opened, 2)
+        XCTAssertEqual(actions.closed, 2)
+    }
+
+    func testACloseForAMenuThatNeverOpenedIsIgnored() {
+        _ = menu()
+        let notOpened = try! XCTUnwrap(app.builtMenu)
+        _ = menu()
+        app.menuDidClose(notOpened)
+        XCTAssertEqual(actions.closed, 0, "a close for a menu that never opened is not ours to report")
+    }
+
     // MARK: - Choosing
 
     func testChoosingAModelSetsOnlyItsOwnRouteAndAppliesNextDictation() {

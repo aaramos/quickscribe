@@ -232,14 +232,23 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
 
     /// The menu just opened: ask for a fresh list in the background. The menu on
     /// screen is the one already built and is not touched.
+    /// The menu the person is actually looking at. Remembered when it opens,
+    /// because a rebuild while it is open installs a NEW menu as the status
+    /// item's menu, and the close then arrives for the old one. Comparing a
+    /// close against the latest built menu would miss that close and leave the
+    /// app believing a menu is still open, so a landed refresh would not show.
+    private(set) var openMenu: NSMenu?
+
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === builtMenu else { return }
+        openMenu = menu
         actions?.menuDidOpen()
         actions?.refreshModels()
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        guard menu === builtMenu else { return }
+        guard menu === openMenu else { return }
+        openMenu = nil
         actions?.menuDidClose()
     }
 
