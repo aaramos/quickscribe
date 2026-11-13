@@ -8,7 +8,7 @@ enum AppInfo {
     static let bundleID = "local.quickscribe.native"
 
     /// The only version number. build_app.sh reads it into the app's Info.plist.
-    static let version = "2.0.1"
+    static let version = "2.0.2"
 
     /// Where releases live. The update check reads this repo's latest release
     /// and links to its page. It never downloads or installs anything.

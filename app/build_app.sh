@@ -37,6 +37,12 @@ mkdir -p "$MACOS" "$RES"
 cp "$BIN" "$MACOS/$APP_NAME"
 chmod +x "$MACOS/$APP_NAME"
 
+# The app icon: Resources/QuickScribe.iconset (the ten PNG sizes macOS wants) becomes
+# AppIcon.icns inside the bundle. Without it Finder, the Dock and System Settings show
+# a blank generic icon.
+echo "==> app icon"
+iconutil -c icns "Resources/QuickScribe.iconset" -o "$RES/AppIcon.icns"
+
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,6 +52,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key>      <string>${APP_NAME}</string>
     <key>CFBundleExecutable</key>       <string>${APP_NAME}</string>
     <key>CFBundleIdentifier</key>       <string>${BUNDLE_ID}</string>
+    <key>CFBundleIconFile</key>         <string>AppIcon</string>
     <key>CFBundlePackageType</key>      <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
     <key>CFBundleVersion</key>          <string>${VERSION}</string>
