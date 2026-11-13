@@ -8,11 +8,11 @@ enum AppInfo {
     static let bundleID = "local.quickscribe.native"
 
     /// The only version number. build_app.sh reads it into the app's Info.plist.
-    static let version = "2.0"
+    static let version = "2.0.1"
 
     /// Where releases live. The update check reads this repo's latest release
     /// and links to its page. It never downloads or installs anything.
-    static let githubRepo = "aaramos/quickscribe-native"
+    static let githubRepo = "aaramos/quickscribe"
 
     /// Earlier releases showed as "QuickScribe Native" and kept their data in a
     /// folder named after that. DataMigration moves it on first launch.
