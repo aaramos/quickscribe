@@ -35,6 +35,8 @@ To build the installer yourself, run `app/make_installer.sh`.
 ## How to use it
 
 - Hold **⌃⌘** to talk and release to insert. Press any other key or Esc to cancel.
+- From the menu bar, choose **Start Recording (hands-free)** to record until you pick
+  Stop — for when your hands are busy.
 - Pick a mode with **⌃⌘1** Polish, **⌃⌘2** Concise or **⌃⌘3** Active Voice, from the
   **Mode** submenu in the menu bar, or by saying "switch to concise" at the start of a
   dictation. The submenu's title shows the mode in use.
@@ -43,9 +45,11 @@ To build the installer yourself, run `app/make_installer.sh`.
 
 ## Updating
 
-The app checks GitHub at launch and once a day. When a newer version is out you get one
-short notice on screen, and the menu grows an "Update available: version X" item that
-opens that release's page; the menu bar icon itself does not change. The notice never
+The app checks GitHub at launch and once a day, reading the latest release of
+[aaramos/quickscribe](https://github.com/aaramos/quickscribe/releases). When a newer
+version is out you get one short notice on screen, and the menu grows an "Update
+available: version X" item that opens that release's page; the menu bar icon itself
+does not change. The notice never
 interrupts a dictation: if you are recording, it waits for a quiet moment. The app never
 downloads or installs anything itself: you drag the new disk image to Applications when
 you choose. Coming from version 1.0, the old app is named QuickScribe Native, not
