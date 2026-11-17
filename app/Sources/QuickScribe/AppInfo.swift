@@ -9,7 +9,7 @@ enum AppInfo {
     static let bundleID = "local.quickscribe.native"
 
     /// The only version number. build_app.sh reads it into the app's Info.plist.
-    static let version = "2.1.0"
+    static let version = "2.1.1"
 
     /// The build number and source commit build_app.sh stamped into Info.plist.
     /// A copy run outside an app bundle (tests, swift run) has neither.
