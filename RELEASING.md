@@ -75,7 +75,10 @@ disk image still needs it once.
    the installer will, checks the signature against the designated requirement and the
    version against `AppInfo.swift`, and prints the publish commands.
 
-5. Publish, only when you mean to. Every installed copy sees the release from its next
+5. Write the release notes in `release-notes/<version>.md`, with the two SHA-256 lines
+   from step 4. Do not rebuild after that: a rebuild changes the hashes.
+
+6. Publish, only when you mean to. Every installed copy sees the release from its next
    check:
 
    ```bash
@@ -83,13 +86,13 @@ disk image still needs it once.
    ```
 
    ```bash
-   gh release create v2.1.0 app/build/QuickScribe.dmg app/build/QuickScribe.zip --title "QuickScribe 2.1.0" --notes-file notes.md
+   gh release create v2.1.0 app/build/QuickScribe.dmg app/build/QuickScribe.zip --title "QuickScribe 2.1.0" --notes-file release-notes/2.1.0.md
    ```
 
    Both files must be uploaded in the same release, and the zip's name must stay
    `QuickScribe.zip`.
 
-6. Check it from a real copy: on a Mac running the previous version, open the menu and
+7. Check it from a real copy: on a Mac running the previous version, open the menu and
    choose Install. To check the release answer without a copy:
 
    ```bash
