@@ -20,6 +20,10 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
         /// service no longer lists.
         var speechModel: String
         var cleanupModel: String
+        /// The release carries an archive this copy can install over itself.
+        var updateInstallable = false
+        /// An install is downloading or checking right now.
+        var updateInstalling = false
     }
 
     /// Callbacks into the app. Kept as closures so tests can watch what a click
@@ -37,6 +41,8 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
         // lands mid-read rebuilds on close instead of under the reader.
         var menuDidOpen: () -> Void
         var menuDidClose: () -> Void
+        /// Download, check and install the announced release, then relaunch.
+        var installUpdate: () -> Void = {}
     }
 
     var actions: Actions?
@@ -82,9 +88,7 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
                                chosen: state.cleanupModel,
                                route: state.snapshot.cleanup))
 
-        if let version = state.updateVersion {
-            let item = NSMenuItem(title: "Update available: version \(version)",
-                                  action: #selector(releasePageTapped), keyEquivalent: "")
+        for item in Self.updateItems(state) {
             item.target = self
             menu.addItem(item)
         }
@@ -269,5 +273,29 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
     @objc private func handsFreeTapped() { actions?.toggleHandsFree() }
     @objc private func openAccessibilityTapped() { actions?.openAccessibility() }
     @objc private func releasePageTapped() { actions?.openReleasePage() }
+    @objc private func installUpdateTapped() { actions?.installUpdate() }
+
+    /// The update lines. One click on the first installs and relaunches; the
+    /// page link stays beside it, for reading what changed. A release with
+    /// no archive, or a copy that cannot check a signature against itself,
+    /// gets the page link alone, as before.
+    static func updateItems(_ state: State) -> [NSMenuItem] {
+        guard let version = state.updateVersion else { return [] }
+        if state.updateInstalling {
+            let busy = NSMenuItem(title: "Installing version \(version)…", action: nil, keyEquivalent: "")
+            busy.isEnabled = false
+            return [busy]
+        }
+        guard state.updateInstallable else {
+            return [NSMenuItem(title: "Update available: version \(version)",
+                               action: #selector(releasePageTapped), keyEquivalent: "")]
+        }
+        return [
+            NSMenuItem(title: "Install version \(version) and Relaunch",
+                       action: #selector(installUpdateTapped), keyEquivalent: ""),
+            NSMenuItem(title: "What's New in version \(version)…",
+                       action: #selector(releasePageTapped), keyEquivalent: "")
+        ]
+    }
     @objc private func settingsTapped() { actions?.showSettings() }
 }

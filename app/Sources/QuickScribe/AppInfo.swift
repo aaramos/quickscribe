@@ -1,4 +1,5 @@
 import Foundation
+import QuickScribeCore
 
 /// SINGLE PLACE for app identity. build_app.sh reads these constants to generate
 /// Info.plist. The bundle id stays the one from the first release, so people who
@@ -10,9 +11,22 @@ enum AppInfo {
     /// The only version number. build_app.sh reads it into the app's Info.plist.
     static let version = "2.0.2"
 
-    /// Where releases live. The update check reads this repo's latest release
-    /// and links to its page. It never downloads or installs anything.
+    /// Where releases live. The update check reads this repo's latest release;
+    /// the menu's update item installs that release's QuickScribe.zip, or
+    /// links to its page when the release has only a disk image.
     static let githubRepo = "aaramos/quickscribe"
+
+    /// The environment variable that points the update check at a rehearsal
+    /// feed on this Mac (127.0.0.1 or localhost only). See RELEASING.md. A
+    /// download from it must still carry this app's own signature.
+    static let testFeedVariable = "QUICKSCRIBE_UPDATE_FEED"
+
+    static var updateFeed: UpdateFeed? {
+        if let base = ProcessInfo.processInfo.environment[testFeedVariable], !base.isEmpty {
+            return UpdateFeed.local(base: base)    // a bad value checks nowhere, never GitHub by surprise
+        }
+        return UpdateFeed.github(repo: githubRepo)
+    }
 
     /// Earlier releases showed as "QuickScribe Native" and kept their data in a
     /// folder named after that. DataMigration moves it on first launch.

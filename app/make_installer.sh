@@ -40,11 +40,12 @@ What it needs, before you start:
 
 Updating:
 The app asks GitHub at launch and once a day. When a newer version is out you get one
-short notice on screen and the menu grows an "Update available: version X" item that
-links to the release page; the icon itself does not change. The app never downloads or
-installs anything itself. To update: quit the app, download
-the new disk image from the release page, drag the app to Applications to replace the
-old one, and reopen. Coming from version 1.0, the old app is named QuickScribe Native,
+short notice on screen and the menu grows an "Install version X and Relaunch" item, with
+"What's New in version X" beside it. One click downloads the new version, checks it is
+signed by the same certificate as the app you are running, replaces the app and reopens
+it. Nothing downloads until you click. If anything goes wrong the app is left as it was
+and the release page opens: then quit the app, download the new disk image, drag the app
+to Applications to replace the old one, and reopen. Coming from version 1.0, the old app is named QuickScribe Native,
 not ${APP_NAME}: after installing this version, quit QuickScribe Native and drag it to
 the Trash, or you will have both apps. Releases share one steady self-made signature,
 so an update is the same app to macOS. macOS may still ask for Microphone and Accessibility after an update:
@@ -61,7 +62,8 @@ there to see how many speech and clean up models it has; choose them from the Sp
 Model and Clean Up Model submenus, where Apple Native is always first. With no address,
 only Apple Native is offered, and nothing leaves the Mac except the version check at
 launch and once a day, which sends only the app name and version; like any web request,
-it lets GitHub see your network address.
+it lets GitHub see your network address. Choosing Install also downloads the update
+from GitHub.
 README
 
 rm -f "$DMG"

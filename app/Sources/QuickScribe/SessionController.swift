@@ -144,6 +144,17 @@ final class SessionController {
     /// eyes. Outside notices wait for a genuinely empty pill.
     var pillIsFree: Bool { overlay.state == .hidden }
 
+    /// Words are being captured or worked on: from the hotkey press until the
+    /// text lands. An update install waits for this to end; a notice on the
+    /// pill, the update's own included, does not count.
+    var isDictating: Bool {
+        if mode != .idle { return true }
+        switch overlay.state {
+        case .recording, .processing: return true
+        default: return false
+        }
+    }
+
     /// Gets both Apple models ready so the first dictation isn't the slow one. A
     /// missing speech model downloads through the OS here.
     func prepare() {

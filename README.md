@@ -44,11 +44,22 @@ To build the installer yourself, run `app/make_installer.sh`.
 ## Updating
 
 The app checks GitHub at launch and once a day. When a newer version is out you get one
-short notice on screen, and the menu grows an "Update available: version X" item that
-opens that release's page; the menu bar icon itself does not change. The notice never
-interrupts a dictation: if you are recording, it waits for a quiet moment. The app never
-downloads or installs anything itself: you drag the new disk image to Applications when
-you choose. Coming from version 1.0, the old app is named QuickScribe Native, not
+short notice on screen, and the menu grows an **Install version X and Relaunch** item,
+with **What's New in version X…** beside it for the release page. One click on Install
+downloads the new version, checks that it is signed by the same "QuickScribe Release"
+certificate as the copy you are running, replaces the app in Applications and reopens
+it. Nothing downloads until you click. The notice never interrupts a dictation, and
+Install waits until you are not recording. If anything goes wrong (no network, a
+damaged download, a signature that does not match, no permission to write to
+Applications) the installed app is left exactly as it was and the release page opens,
+so you can update by hand: quit the app, drag the new disk image's app to Applications,
+and reopen.
+
+A copy on version 2.0.2 or earlier can only tell you a new version is out. Install the
+next version by hand from its disk image, once; from then on updates are one click. A copy you built yourself from source, signed ad-hoc, also gets the release-page
+link only, because there is no steady signature to check a download against.
+
+Coming from version 1.0, the old app is named QuickScribe Native, not
 QuickScribe: after installing this version, quit QuickScribe Native and drag it to the
 Trash, or you will have both apps. After an update macOS may ask for Microphone and Accessibility again; switch
 them back on if the hotkeys go quiet. If a switch already looks on but the hotkeys are
@@ -74,7 +85,8 @@ address is refused. A non-local address also shows a warning on screen.
 What always leaves the Mac, even with no address set: a plain HTTPS question to GitHub's
 release API ("is there a newer version?") at launch and once a day, carrying nothing but
 the app name and version. No words, no audio. Like any web request, it lets GitHub see
-your network address.
+your network address. When you choose Install, the app also downloads that release's
+`QuickScribe.zip` from GitHub, with the same name-and-version header.
 
 Don't run it alongside the original QuickScribe. Both use the same hotkey, so this one
 refuses to record and says why.
@@ -123,8 +135,14 @@ Releases share one steady self-made signature. `app/make_signing_identity.sh` cr
 "QuickScribe Release" certificate in the login keychain once, free, with no Apple
 account; `CODESIGN_IDENTITY="QuickScribe Release" ./make_installer.sh` then builds with
 it. macOS recognizes updates from that identity as the same app, which is what lets
-permissions survive an update. It does not remove the first-open block, which only
-Apple's paid program can, and it changes no system trust settings.
+permissions survive an update, and the in-app installer accepts only a download signed
+by it. It does not remove the first-open block, which only Apple's paid program can,
+and it changes no system trust settings.
+
+`app/make_release.sh` builds and checks everything a release publishes (the disk image
+and the `QuickScribe.zip` the in-app installer uses) and publishes nothing;
+`app/rehearse_update.sh` runs a whole one-click update on this Mac against a local feed.
+The release steps are in [RELEASING.md](RELEASING.md).
 
 `eval/` runs 50 scripted dictations, spoken by Apple's text-to-speech voice, through
 the app's own speech and cleanup paths. See `eval/README.md`.

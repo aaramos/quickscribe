@@ -23,6 +23,7 @@ final class MenuBarMenuTests: XCTestCase {
         var handsFree = 0
         var opened = 0
         var closed = 0
+        var installs = 0
     }
 
     override func setUp() async throws {
@@ -47,7 +48,8 @@ final class MenuBarMenuTests: XCTestCase {
             showSettings: {},
             refreshModels: { recorded.refreshes += 1 },
             menuDidOpen: { recorded.opened += 1 },
-            menuDidClose: { recorded.closed += 1 })
+            menuDidClose: { recorded.closed += 1 },
+            installUpdate: { recorded.installs += 1 })
     }
 
     override func tearDown() {
@@ -442,6 +444,42 @@ final class MenuBarMenuTests: XCTestCase {
     }
 
     /// The whole menu keeps hands-free, Settings, Quit, and the update item.
+    private func updateState(installable: Bool, installing: Bool = false) -> MainMenuAssembly.State {
+        let s = store.load()
+        return MainMenuAssembly.State(
+            hotkeysOff: false, cleanupProblem: nil, recording: false, profile: "polish",
+            snapshot: models.snapshot(), updateVersion: "2.1", speechModel: s.speechModel,
+            cleanupModel: s.cleanupModel, updateInstallable: installable, updateInstalling: installing)
+    }
+
+    /// One click installs: the first update line installs and relaunches,
+    /// the page link sits beside it for reading what changed.
+    func testAnInstallableUpdateIsOneClick() {
+        let menu = app.build(updateState(installable: true))
+        let install = menu.items.first { $0.title == "Install version 2.1 and Relaunch" }
+        XCTAssertNotNil(install)
+        XCTAssertTrue(menu.items.contains { $0.title == "What's New in version 2.1…" })
+        XCTAssertFalse(menu.items.contains { $0.title.hasPrefix("Update available") })
+        _ = install?.target?.perform(install?.action, with: install)
+        XCTAssertEqual(actions.installs, 1)
+    }
+
+    /// No archive, or a copy that cannot check a signature: the page link
+    /// alone, exactly as releases before the installer showed it.
+    func testANotInstallableUpdateKeepsThePageLink() {
+        let titles = app.build(updateState(installable: false)).items.map(\.title)
+        XCTAssertTrue(titles.contains("Update available: version 2.1"))
+        XCTAssertFalse(titles.contains { $0.hasPrefix("Install version") })
+    }
+
+    /// While it downloads and checks, one greyed line and nothing to click twice.
+    func testAnInstallInProgressCannotBeStartedAgain() {
+        let menu = app.build(updateState(installable: true, installing: true))
+        let lines = menu.items.filter { $0.title.contains("2.1") }
+        XCTAssertEqual(lines.map(\.title), ["Installing version 2.1…"])
+        XCTAssertFalse(lines[0].isEnabled)
+    }
+
     func testTheRestOfTheMenuIsKept() {
         let s = store.load()
         let state = MainMenuAssembly.State(

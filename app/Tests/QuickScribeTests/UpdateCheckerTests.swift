@@ -59,7 +59,7 @@ final class UpdateCheckerTests: XCTestCase {
 
     func testNewerSameAndOlderAreToldApart() async {
         let up = await check(release(tag: "v2.1", page: page), 200)
-        XCTAssertEqual(up, .newer(version: "2.1", page: URL(string: page)!),
+        XCTAssertEqual(up, .newer(version: "2.1", page: URL(string: page)!, archive: nil),
                        "the menu must read 'version 2.1', never 'version v2.1'")
         let same = await check(release(tag: "v2.0", page: page), 200)
         XCTAssertEqual(same, .current)
@@ -112,7 +112,7 @@ final class UpdateCheckerTests: XCTestCase {
 
     func testVAndPlainAreTheSameNewsOnceTold() {
         let pageURL = URL(string: page)!
-        XCTAssertEqual(UpdateChecker.noticeVersion(for: .newer(version: "2.1", page: pageURL), lastNotified: "2.1"), nil)
+        XCTAssertEqual(UpdateChecker.noticeVersion(for: .newer(version: "2.1", page: pageURL, archive: nil), lastNotified: "2.1"), nil)
         // (The check itself hands over "2.1" for a "v2.1" tag, which is how
         // the two spellings can never both be announced.)
         XCTAssertEqual(UpdateChecker.displayVersion("v2.1"), "2.1")
@@ -132,7 +132,7 @@ final class UpdateCheckerTests: XCTestCase {
         config.protocolClasses = [WireCapture.self]
         let answer = await UpdateChecker.check(repo: "example/native", appName: "QuickScribe",
                                               appVersion: "2.0", session: URLSession(configuration: config))
-        XCTAssertEqual(answer, .newer(version: "2.1", page: URL(string: page)!))
+        XCTAssertEqual(answer, .newer(version: "2.1", page: URL(string: page)!, archive: nil))
         let sent = WireCapture.captured
         XCTAssertEqual(sent?.value(forHTTPHeaderField: "User-Agent"), "QuickScribe/2.0")
         XCTAssertEqual(sent?.value(forHTTPHeaderField: "Accept-Language"), "en",
@@ -147,7 +147,7 @@ final class UpdateCheckerTests: XCTestCase {
     // MARK: once per version
 
     func testTheNoticeShowsOncePerVersion() {
-        let newer = UpdateChecker.Check.newer(version: "2.1", page: URL(string: page)!)
+        let newer = UpdateChecker.Check.newer(version: "2.1", page: URL(string: page)!, archive: nil)
         XCTAssertEqual(UpdateChecker.noticeVersion(for: newer, lastNotified: nil), "2.1")
         XCTAssertNil(UpdateChecker.noticeVersion(for: newer, lastNotified: "2.1"), "no nagging")
         XCTAssertEqual(UpdateChecker.noticeVersion(for: newer, lastNotified: "2.0"), "2.1")
@@ -175,4 +175,73 @@ final class WireCapture: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+/// The update archive a release offers, read from GitHub's answer. Only the
+/// one named QuickScribe.zip under this repository's release downloads is
+/// ever handed to the installer.
+final class UpdateArchiveTests: XCTestCase {
+    private let page = "https://github.com/example/native/releases/tag/v2.1"
+    private let zipURL = "https://github.com/example/native/releases/download/v2.1/QuickScribe.zip"
+    private let digest = "sha256:" + String(repeating: "ab", count: 32)
+
+    private func answer(_ assets: [[String: Any]]) -> UpdateChecker.Check {
+        let data = try! JSONSerialization.data(withJSONObject: ["tag_name": "v2.1", "html_url": page, "assets": assets])
+        return UpdateChecker.evaluate(data: data, status: 200, currentVersion: "2.0", repo: "example/native")
+    }
+    private func archive(of check: UpdateChecker.Check) -> UpdateChecker.Archive? {
+        guard case .newer(_, _, let archive) = check else { XCTFail("expected newer"); return nil }
+        return archive
+    }
+
+    func testTheArchiveIsFoundWithItsDigestAndSize() {
+        let dmg: [String: Any] = ["name": "QuickScribe.dmg",
+                                  "browser_download_url": "https://github.com/example/native/releases/download/v2.1/QuickScribe.dmg"]
+        let zip: [String: Any] = ["name": "QuickScribe.zip", "browser_download_url": zipURL, "digest": digest, "size": 1234]
+        let found = archive(of: answer([dmg, zip]))
+        XCTAssertEqual(found, UpdateChecker.Archive(url: URL(string: zipURL)!,
+                                                    sha256: String(repeating: "ab", count: 32), size: 1234))
+    }
+
+    func testAReleaseWithOnlyADiskImageIsStillAnnounced() {
+        let dmg: [String: Any] = ["name": "QuickScribe.dmg",
+                                  "browser_download_url": "https://github.com/example/native/releases/download/v2.1/QuickScribe.dmg"]
+        XCTAssertEqual(answer([dmg]), .newer(version: "2.1", page: URL(string: page)!, archive: nil))
+        XCTAssertNil(archive(of: answer([])))
+    }
+
+    func testAnArchiveFromAnywhereElseIsIgnored() {
+        for bad in ["https://github.com/other/native/releases/download/v2.1/QuickScribe.zip",
+                    "http://github.com/example/native/releases/download/v2.1/QuickScribe.zip",
+                    "https://github.com.evil.example/example/native/releases/download/v2.1/QuickScribe.zip",
+                    "https://evil.example/example/native/releases/download/v2.1/QuickScribe.zip",
+                    "https://github.com/example/native/releases/download/v2.1/QuickScribe.zip?x=1",
+                    "https://github.com/example/native/releases/download/../../../other/QuickScribe.zip",
+                    "https://github.com/example/native/releases/download/v2.1/Other.zip"] {
+            let zip: [String: Any] = ["name": "QuickScribe.zip", "browser_download_url": bad]
+            XCTAssertNil(archive(of: answer([zip])), bad)
+        }
+    }
+
+    func testTwoArchivesOrABrokenDigestMeanNone() {
+        let zip: [String: Any] = ["name": "QuickScribe.zip", "browser_download_url": zipURL]
+        XCTAssertNil(archive(of: answer([zip, zip])), "which one would we install?")
+        let short: [String: Any] = ["name": "QuickScribe.zip", "browser_download_url": zipURL, "digest": "sha256:abc"]
+        XCTAssertNil(archive(of: answer([short])))
+        let none: [String: Any] = ["name": "QuickScribe.zip", "browser_download_url": zipURL]
+        XCTAssertEqual(archive(of: answer([none]))?.sha256, nil, "no digest is allowed: the signature still decides")
+    }
+
+    func testTheRehearsalFeedIsThisMacOnly() {
+        XCTAssertNotNil(UpdateFeed.local(base: "http://127.0.0.1:8765"))
+        XCTAssertNotNil(UpdateFeed.local(base: "http://localhost:8765/"))
+        XCTAssertNil(UpdateFeed.local(base: "http://192.168.1.4:8765"))
+        XCTAssertNil(UpdateFeed.local(base: "https://example.com"))
+        XCTAssertNil(UpdateFeed.local(base: "file:///tmp"))
+        let feed = UpdateFeed.local(base: "http://127.0.0.1:8765")!
+        XCTAssertEqual(feed.latestRelease.absoluteString, "http://127.0.0.1:8765/releases/latest")
+        XCTAssertTrue(feed.allowsDownload(URL(string: "http://127.0.0.1:8765/download/QuickScribe.zip")!))
+        XCTAssertFalse(feed.allowsDownload(URL(string: "http://127.0.0.1:9999/download/QuickScribe.zip")!))
+        XCTAssertFalse(feed.allowsDownload(URL(string: "https://github.com/x/y/releases/download/v1/QuickScribe.zip")!))
+    }
 }

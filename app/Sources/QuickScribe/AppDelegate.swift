@@ -28,7 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A release newer than this app, when GitHub says so. The menu carries
     /// it until the next check says we are level again; the pill says it
     /// once per version, kept in UserDefaults under this key.
-    private var availableUpdate: (version: String, page: URL)?
+    private var availableUpdate: (version: String, page: URL, archive: UpdateChecker.Archive?)?
+    /// This copy as an update target, or why it cannot install over itself
+    /// (built from source, or run from a translocated copy). Read once.
+    private lazy var updateTarget = UpdateInstaller.target(bundle: .main, appName: AppInfo.displayName,
+                                                           currentVersion: AppInfo.version)
+    private var updateInstalling = false
     private static let updateNotifiedKey = "UpdateNoticeVersion"
     /// One session for the whole life of the app. Ephemeral stores nothing
     /// on disk; keeping it alive lets the connection wind down on its own
@@ -76,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startUpdateChecks()
     }
 
-    // MARK: - Update notice
+    // MARK: - Update notice and install
 
     /// A question to GitHub at launch and once a day. It runs beside
     /// dictation, never before it: nothing here gates a recording, and every
@@ -91,13 +96,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func runUpdateCheck() {
         Task { [weak self] in
             guard let self else { return }
-            let answer = await UpdateChecker.check(repo: AppInfo.githubRepo,
+            guard let feed = AppInfo.updateFeed else {
+                NSLog("QuickScribe: update feed address refused; no update check")
+                return
+            }
+            let answer = await UpdateChecker.check(feed: feed,
                                                    appName: AppInfo.displayName,
                                                    appVersion: AppInfo.version,
                                                    session: updateSession)
+            guard !self.updateInstalling else { return }   // the menu keeps what is being installed
             switch answer {
-            case .newer(let version, let page):
-                self.availableUpdate = (version, page)
+            case .newer(let version, let page, let archive):
+                self.availableUpdate = (version, page, archive)
                 let busy = !self.session.pillIsFree
                 if let notice = Self.updateNotice(answer,
                                                   lastNotified: UserDefaults.standard
@@ -135,6 +145,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openReleasePage() {
         if let page = availableUpdate?.page { NSWorkspace.shared.open(page) }
+    }
+
+    /// The menu offers one-click install only when it can finish the job:
+    /// the release has an archive, and this copy has a real signature to
+    /// hold the download to.
+    private var updateInstallable: Bool {
+        guard availableUpdate?.archive != nil, case .success = updateTarget else { return false }
+        return true
+    }
+
+    /// One click: download, check the signature, swap the app, relaunch.
+    /// Never during a dictation, and never twice at once. Any failure leaves
+    /// the installed app untouched and opens the release page, so the person
+    /// can still update by hand.
+    private func installUpdate() {
+        guard !updateInstalling, let update = availableUpdate, let archive = update.archive,
+              let feed = AppInfo.updateFeed else { return }
+        guard case .success(let target) = updateTarget else { openReleasePage(); return }
+        guard !session.isDictating else {
+            overlayWarn("Finish the dictation first, then choose Install again.", autoHideAfter: 4)
+            return
+        }
+        updateInstalling = true
+        rebuildMenu()
+        overlayWarn("Downloading version \(update.version)…")
+        let agent = "\(AppInfo.displayName)/\(AppInfo.version)"
+        Task { [weak self] in
+            do {
+                let installed = try await UpdateInstaller.install(
+                    archive: archive, version: update.version, target: target, feed: feed,
+                    userAgent: agent, download: UpdateInstaller.urlSessionDownload)
+                NSLog("QuickScribe: installed version %@; relaunching", update.version)
+                try UpdateInstaller.startRelauncher(pid: ProcessInfo.processInfo.processIdentifier, app: installed)
+                self?.overlayWarn("Version \(update.version) installed. Relaunching…")
+                try? await Task.sleep(for: .milliseconds(600))
+                NSApp.terminate(nil)
+            } catch {
+                guard let self else { return }
+                let reason = (error as? UpdateInstaller.Failure)?.description ?? "unexpected error"
+                NSLog("QuickScribe: update install stopped: %@", reason)
+                self.updateInstalling = false
+                self.rebuildMenu()
+                self.overlayWarn("Couldn't update: \(reason). Opening the release page.", autoHideAfter: 6)
+                self.openReleasePage()
+            }
+        }
     }
 
     /// True only when the global event tap is live (hotkeys actually work).
@@ -290,7 +346,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             snapshot: modelStore.snapshot(),
             updateVersion: availableUpdate?.version,
             speechModel: settings.speechModel,
-            cleanupModel: settings.cleanupModel)
+            cleanupModel: settings.cleanupModel,
+            updateInstallable: updateInstallable,
+            updateInstalling: updateInstalling)
         statusItem.menu = menuAssembly.build(state)
     }
 
@@ -330,7 +388,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // item's action is not certain, so the rebuild waits for the
                 // next main-queue turn rather than racing that action.
                 DispatchQueue.main.async { [weak self] in self?.rebuildMenu() }
-            })
+            },
+            installUpdate: { [weak self] in self?.installUpdate() })
     }
 
     /// Apple Native, or a server model, on one route only: speech and cleanup

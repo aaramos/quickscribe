@@ -9,7 +9,7 @@ import XCTest
 final class UpdateNoticeGateTests: XCTestCase {
 
     private let newer = UpdateChecker.Check.newer(
-        version: "2.1", page: URL(string: "https://github.com/example/native/releases/tag/v2.1")!)
+        version: "2.1", page: URL(string: "https://github.com/example/native/releases/tag/v2.1")!, archive: nil)
 
     /// Every pill state except an empty pill counts as busy, read off a
     /// real session: the words arriving, the words being worked on, a
@@ -53,5 +53,25 @@ final class UpdateNoticeGateTests: XCTestCase {
                        "at the quiet moment the same check announces")
         XCTAssertNil(AppDelegate.updateNotice(newer, lastNotified: "2.1", sessionBusy: false),
                      "a skipped notice is retold later; a told one never")
+    }
+
+    /// Install waits for a dictation, and only for a dictation: the update's
+    /// own notice, or any other message on the pill, must not block it.
+    func testInstallWaitsForDictationNotForANotice() {
+        let prompts = PromptLibrary(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("qs-prompts-\(UUID().uuidString).json"))
+        let session = SessionController(prompts: prompts,
+                                        endpointStore: EndpointSettingsStore(
+                                            defaults: UserDefaults(suiteName: "qs.gate.\(UUID().uuidString)")!,
+                                            secrets: MemorySecrets.Store()))
+        XCTAssertFalse(session.isDictating)
+        session.showOverlay(.recording(mode: "Clean up"))
+        XCTAssertTrue(session.isDictating, "words arriving")
+        session.showOverlay(.processing)
+        XCTAssertTrue(session.isDictating, "words being cleaned up")
+        session.showOverlay(.error("Version 2.1 is out. Open the QuickScribe menu."))
+        XCTAssertFalse(session.isDictating, "the update notice itself is no dictation")
+        session.showOverlay(.inserted)
+        XCTAssertFalse(session.isDictating)
     }
 }
