@@ -43,6 +43,8 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
         var menuDidClose: () -> Void
         /// Download, check and install the announced release, then relaunch.
         var installUpdate: () -> Void = {}
+        /// The About panel: name, version, build.
+        var showAbout: () -> Void = {}
     }
 
     var actions: Actions?
@@ -94,6 +96,9 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        let about = NSMenuItem(title: "About \(AppInfo.displayName)", action: #selector(aboutTapped), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
         let settings = NSMenuItem(title: "Settings…", action: #selector(settingsTapped), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -274,6 +279,7 @@ final class MainMenuAssembly: NSObject, NSMenuDelegate {
     @objc private func openAccessibilityTapped() { actions?.openAccessibility() }
     @objc private func releasePageTapped() { actions?.openReleasePage() }
     @objc private func installUpdateTapped() { actions?.installUpdate() }
+    @objc private func aboutTapped() { actions?.showAbout() }
 
     /// The update lines. One click on the first installs and relaunches; the
     /// page link stays beside it, for reading what changed. A release with

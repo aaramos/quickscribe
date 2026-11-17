@@ -389,7 +389,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // next main-queue turn rather than racing that action.
                 DispatchQueue.main.async { [weak self] in self?.rebuildMenu() }
             },
-            installUpdate: { [weak self] in self?.installUpdate() })
+            installUpdate: { [weak self] in self?.installUpdate() },
+            showAbout: { [weak self] in self?.showAbout() })
     }
 
     /// Apple Native, or a server model, on one route only: speech and cleanup
@@ -410,4 +411,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() { settingsWindow.show() }
+
+    /// The standard About panel, saying which version and build this is. A
+    /// menu bar app has no window of its own, so it comes to the front first.
+    private func showAbout() {
+        let lines = AppInfo.aboutLines(version: AppInfo.version, build: AppInfo.build, commit: AppInfo.commit)
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: AppInfo.displayName,
+            .applicationVersion: lines.version,
+            .version: lines.build,
+            .credits: NSAttributedString(string: "Releases: github.com/\(AppInfo.githubRepo)",
+                                         attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                                                      .foregroundColor: NSColor.secondaryLabelColor])
+        ])
+    }
 }

@@ -24,6 +24,7 @@ final class MenuBarMenuTests: XCTestCase {
         var opened = 0
         var closed = 0
         var installs = 0
+        var abouts = 0
     }
 
     override func setUp() async throws {
@@ -49,7 +50,8 @@ final class MenuBarMenuTests: XCTestCase {
             refreshModels: { recorded.refreshes += 1 },
             menuDidOpen: { recorded.opened += 1 },
             menuDidClose: { recorded.closed += 1 },
-            installUpdate: { recorded.installs += 1 })
+            installUpdate: { recorded.installs += 1 },
+            showAbout: { recorded.abouts += 1 })
     }
 
     override func tearDown() {
@@ -478,6 +480,24 @@ final class MenuBarMenuTests: XCTestCase {
         let lines = menu.items.filter { $0.title.contains("2.1") }
         XCTAssertEqual(lines.map(\.title), ["Installing version 2.1…"])
         XCTAssertFalse(lines[0].isEnabled)
+    }
+
+    /// The menu always has About, which names the version and build.
+    func testAboutIsAlwaysThereAndOpensThePanel() {
+        let menu = app.build(updateState(installable: false))
+        let about = menu.items.first { $0.title == "About QuickScribe" }
+        XCTAssertNotNil(about)
+        _ = about?.target?.perform(about?.action, with: about)
+        XCTAssertEqual(actions.abouts, 1)
+    }
+
+    func testTheAboutLinesNameVersionBuildAndSource() {
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: "e2e5183").build, "Build 57 (e2e5183)")
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: "e2e5183+").build, "Build 57 (e2e5183+)",
+                       "a build with uncommitted changes says so")
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "0", commit: "unknown").build, "Build 0")
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "dev", commit: nil).build, "Build dev")
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: nil).version, "2.1.0")
     }
 
     func testTheRestOfTheMenuIsKept() {

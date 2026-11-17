@@ -11,6 +11,13 @@ BUNDLE_ID=$(sed -n 's/.*static let bundleID = "\(.*\)"/\1/p' Sources/QuickScribe
 VERSION=$(sed -n 's/.*static let version = "\(.*\)"/\1/p' Sources/QuickScribe/AppInfo.swift)
 [[ -n "$APP_NAME" && -n "$BUNDLE_ID" && -n "$VERSION" ]] || { echo "FATAL: could not read name/bundle id/version from AppInfo.swift" >&2; exit 1; }
 
+# The build number counts the commits behind this source, so every release build
+# has a larger one; the short commit names the exact source. A "+" marks a build
+# made with uncommitted changes. Outside a git checkout both fall back plainly.
+BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+if [[ "$COMMIT" != unknown ]] && ! git diff --quiet HEAD -- . 2>/dev/null; then COMMIT="$COMMIT+"; fi
+
 echo "==> swift build -c release"
 swift build -c release --product QuickScribe
 
@@ -55,7 +62,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>CFBundleIconFile</key>         <string>AppIcon</string>
     <key>CFBundlePackageType</key>      <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
-    <key>CFBundleVersion</key>          <string>${VERSION}</string>
+    <key>CFBundleVersion</key>          <string>${BUILD}</string>
+    <key>QuickScribeCommit</key>        <string>${COMMIT}</string>
     <key>LSMinimumSystemVersion</key>   <string>27.0</string>
     <key>LSUIElement</key>              <true/>
     <key>NSMicrophoneUsageDescription</key>
@@ -97,5 +105,5 @@ codesign --force --entitlements "$ENT_FILE" \
     -s "${CODESIGN_IDENTITY:-"-"}" "$APP"
 rm -f "$ENT_FILE"
 
-echo "==> built: $(cd build && pwd)/${APP_NAME}.app"
+echo "==> built: $(cd build && pwd)/${APP_NAME}.app (version ${VERSION}, build ${BUILD}, ${COMMIT})"
 codesign -dv "$APP" 2>&1 | sed -n '1,4p'

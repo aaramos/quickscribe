@@ -11,6 +11,17 @@ enum AppInfo {
     /// The only version number. build_app.sh reads it into the app's Info.plist.
     static let version = "2.1.0"
 
+    /// The build number and source commit build_app.sh stamped into Info.plist.
+    /// A copy run outside an app bundle (tests, swift run) has neither.
+    static var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "dev" }
+    static var commit: String? { Bundle.main.infoDictionary?["QuickScribeCommit"] as? String }
+
+    /// What About QuickScribe says: "2.1.0", and "Build 57 (e2e5183)".
+    static func aboutLines(version: String, build: String, commit: String?) -> (version: String, build: String) {
+        let source = commit.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
+        return (version, source.map { "Build \(build) (\($0))" } ?? "Build \(build)")
+    }
+
     /// Where releases live. The update check reads this repo's latest release;
     /// the menu's update item installs that release's QuickScribe.zip, or
     /// links to its page when the release has only a disk image.
