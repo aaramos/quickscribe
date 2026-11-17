@@ -492,8 +492,8 @@ final class MenuBarMenuTests: XCTestCase {
     }
 
     func testTheAboutLinesNameVersionBuildAndSource() {
-        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: "e2e5183").build, "Build 57 (e2e5183)")
-        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: "e2e5183+").build, "Build 57 (e2e5183+)",
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: "e2e5183").build, "Build 57 · e2e5183")
+        XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "57", commit: "e2e5183+").build, "Build 57 · e2e5183+",
                        "a build with uncommitted changes says so")
         XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "0", commit: "unknown").build, "Build 0")
         XCTAssertEqual(AppInfo.aboutLines(version: "2.1.0", build: "dev", commit: nil).build, "Build dev")

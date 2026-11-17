@@ -16,10 +16,12 @@ enum AppInfo {
     static var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "dev" }
     static var commit: String? { Bundle.main.infoDictionary?["QuickScribeCommit"] as? String }
 
-    /// What About QuickScribe says: "2.1.0", and "Build 57 (e2e5183)".
+    /// What About QuickScribe says: "2.1.0", and "Build 57 · e2e5183". macOS
+    /// shows the pair as "Version 2.1.0 (Build 57 · e2e5183)", adding the
+    /// parentheses itself.
     static func aboutLines(version: String, build: String, commit: String?) -> (version: String, build: String) {
         let source = commit.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
-        return (version, source.map { "Build \(build) (\($0))" } ?? "Build \(build)")
+        return (version, source.map { "Build \(build) · \($0)" } ?? "Build \(build)")
     }
 
     /// Where releases live. The update check reads this repo's latest release;
